@@ -2,12 +2,58 @@
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Serialize, Deserialize)]
+// {
+//     "id": 1255839,
+//     "tags": "blue_archive halo sorasaki_hina tagme",
+//     "created_at": 1772443117,
+//     "updated_at": 1772443117,
+//     "creator_id": 294900,
+//     "approver_id": null,
+//     "author": "Aleax",
+//     "change": 6492274,
+//     "source": "https://www.pixiv.net/artworks/141370841",
+//     "score": 1,
+//     "md5": "9bdd440170b23dad4d950a265449ffd2",
+//     "file_size": 7123727,
+//     "file_ext": "jpg",
+//     "file_url": "https://files.yande.re/image/9bdd440170b23dad4d950a265449ffd2/yande.re%201255839%20blue_archive%20halo%20sorasaki_hina%20tagme.jpg",
+//     "is_shown_in_index": true,
+//     "preview_url": "https://assets.yande.re/data/preview/9b/dd/9bdd440170b23dad4d950a265449ffd2.jpg",
+//     "preview_width": 150,
+//     "preview_height": 116,
+//     "actual_preview_width": 300,
+//     "actual_preview_height": 231,
+//     "sample_url": "https://files.yande.re/sample/9bdd440170b23dad4d950a265449ffd2/yande.re%201255839%20sample%20blue_archive%20halo%20sorasaki_hina%20tagme.jpg",
+//     "sample_width": 1500,
+//     "sample_height": 1155,
+//     "sample_file_size": 389491,
+//     "jpeg_url": "https://files.yande.re/image/9bdd440170b23dad4d950a265449ffd2/yande.re%201255839%20blue_archive%20halo%20sorasaki_hina%20tagme.jpg",
+//     "jpeg_width": 3896,
+//     "jpeg_height": 3000,
+//     "jpeg_file_size": 0,
+//     "rating": "s",
+//     "is_rating_locked": false,
+//     "has_children": false,
+//     "parent_id": null,
+//     "status": "active",
+//     "is_pending": false,
+//     "width": 3896,
+//     "height": 3000,
+//     "is_held": true,
+//     "frames_pending_string": "",
+//     "frames_pending": [],
+//     "frames_string": "",
+//     "frames": [],
+//     "is_note_locked": false,
+//     "last_noted_at": 0,
+//     "last_commented_at": 0
+// }
 struct Post {
     id: u32,
     tags: String,
     created_at: i64,
     updated_at: i64,
-    creator_id: u32,
+    creator_id: Option<u32>,
     approver_id: Option<u32>,
     author: String,
     change: u32,
@@ -17,22 +63,26 @@ struct Post {
     file_size: u64,
     file_ext: String,
     file_url: String,
+    is_shown_in_index: bool,
     preview_url: String,
     sample_url: String,
-    sample_width: u32,
-    sample_height: u32,
-    preview_width: u32,
-    preview_height: u32,
-    actual_preview_width: u32,
-    actual_preview_height: u32,
+    sample_width: Option<u32>,
+    sample_height: Option<u32>,
+    sample_file_size: Option<u64>,
+    preview_width: Option<u32>,
+    preview_height: Option<u32>,
+    actual_preview_width: Option<u32>,
+    actual_preview_height: Option<u32>,
     jpeg_url: String,
-    jpeg_width: u32,
-    jpeg_height: u32,
+    jpeg_width: Option<u32>,
+    jpeg_height: Option<u32>,
     jpeg_file_size: u64,
     rating: String,
+    is_rating_locked: bool,
     has_children: bool,
     parent_id: Option<u32>,
     status: String,
+    is_pending: bool,
     width: u32,
     height: u32,
     is_held: bool,
@@ -113,16 +163,63 @@ async fn fetch_posts(tags: Option<String>, limit: Option<u32>, page: Option<u32>
         api_url.push('?');
         api_url.push_str(&query_params.join("&"));
     }
-
+    println!("Constructed API URL: {}", api_url);
     // 发送请求
     match client.get(&api_url)
         .header("Accept", "application/json")
         .send().await {
         Ok(response) => {
             if response.status().is_success() {
-                match response.json::<Vec<Post>>().await {
+                let text = match response.text().await {
+                    Ok(t) => t,
+                    Err(e) => return Err(format!("Failed to read response text: {}", e)),
+                };
+                println!("Response length: {}", text.len());
+                // Try to parse as JSON
+                match serde_json::from_str::<Vec<Post>>(&text) {
                     Ok(posts) => Ok(posts),
-                    Err(e) => Err(format!("Failed to parse JSON: {}", e)),
+                    Err(e) => {
+                        // Print error details and a snippet around the error location
+                        println!("Parse error: {}", e);
+                        let column = e.column();
+                        let start = if column > 50 { column - 50 } else { 0 };
+                        let end = std::cmp::min(text.len(), column + 50);
+                        let snippet = &text[start..end];
+                        println!("Error around column {}: \"{}\"", column, snippet);
+                        Err(format!("Failed to parse JSON: {}", e))
+                    }
+                }
+            } else {
+                Err(format!("Request failed with status: {}", response.status()))
+            }
+        },
+        Err(e) => Err(format!("Failed to send request: {}", e)),
+    }
+}
+
+#[tauri::command]
+async fn fetch_image_as_base64(url: String) -> Result<String, String> {
+    // 创建一个基本的客户端配置
+    let client = reqwest::Client::builder()
+        .user_agent("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/114.0.0.0 Safari/537.36")
+        .danger_accept_invalid_certs(true) // 忽略证书错误
+        .build()
+        .map_err(|e| format!("Failed to create client: {}", e))?;
+
+    println!("Fetching image from URL: {}", url);
+
+    match client.get(&url)
+        .header("Accept", "image/*")
+        .send().await {
+        Ok(response) => {
+            if response.status().is_success() {
+                match response.bytes().await {
+                    Ok(bytes) => {
+                        let base64_string = base64::encode(&bytes);
+                        println!("Image fetched successfully, size: {} bytes, base64 length: {}", bytes.len(), base64_string.len());
+                        Ok(base64_string)
+                    },
+                    Err(e) => Err(format!("Failed to read image bytes: {}", e)),
                 }
             } else {
                 Err(format!("Request failed with status: {}", response.status()))
@@ -136,7 +233,7 @@ async fn fetch_posts(tags: Option<String>, limit: Option<u32>, page: Option<u32>
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
-        .invoke_handler(tauri::generate_handler![greet, fetch_html, fetch_posts])
+        .invoke_handler(tauri::generate_handler![greet, fetch_html, fetch_posts, fetch_image_as_base64])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
 }

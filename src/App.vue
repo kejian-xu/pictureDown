@@ -1,5 +1,5 @@
 <script setup>
-import { ref } from "vue";
+import { ref, computed, onUnmounted, watch } from "vue";
 import { invoke } from "@tauri-apps/api/core";
 
 const tags = ref("");
@@ -8,8 +8,119 @@ const page = ref(1);
 const images = ref([]);
 const loading = ref(false);
 const error = ref("");
+const selectedImageIndex = ref(null);
+const currentImageBase64 = ref(null);
+const loadingImage = ref(false);
+const imageCache = ref({}); // URL -> base64 字符串的缓存
 
+const selectedImage = computed(() => {
+  if (selectedImageIndex.value === null || !images.value[selectedImageIndex.value]) {
+    return null;
+  }
+  return images.value[selectedImageIndex.value];
+});
 
+const showModal = computed(() => selectedImageIndex.value !== null);
+
+function openImageModal(index) {
+  selectedImageIndex.value = index;
+}
+
+function closeModal() {
+  selectedImageIndex.value = null;
+}
+
+function nextImage() {
+  if (selectedImageIndex.value === null) return;
+  const nextIndex = (selectedImageIndex.value + 1) % images.value.length;
+  selectedImageIndex.value = nextIndex;
+}
+
+function prevImage() {
+  if (selectedImageIndex.value === null) return;
+  const prevIndex = (selectedImageIndex.value - 1 + images.value.length) % images.value.length;
+  selectedImageIndex.value = prevIndex;
+}
+
+async function loadImageAsBase64(url) {
+  if (!url) return null;
+
+  // 检查缓存
+  if (imageCache.value[url]) {
+    console.log("Using cached image for URL:", url);
+    return imageCache.value[url];
+  }
+
+  console.log("Fetching image as base64 from URL:", url);
+  loadingImage.value = true;
+  try {
+    const base64String = await invoke("fetch_image_as_base64", { url });
+    // 存储到缓存
+    imageCache.value[url] = base64String;
+    console.log("Image fetched successfully, base64 length:", base64String.length);
+    return base64String;
+  } catch (err) {
+    console.error("Failed to fetch image as base64:", err);
+    return null;
+  } finally {
+    loadingImage.value = false;
+  }
+}
+
+async function loadCurrentImage() {
+  if (!selectedImage.value) {
+    currentImageBase64.value = null;
+    return;
+  }
+
+  const url = selectedImage.value.largeUrl;
+  if (!url) {
+    currentImageBase64.value = null;
+    return;
+  }
+
+  const base64 = await loadImageAsBase64(url);
+  if (base64) {
+    currentImageBase64.value = `data:image/jpeg;base64,${base64}`;
+  } else {
+    currentImageBase64.value = null;
+  }
+}
+
+// 监听 selectedImageIndex 变化，加载图片
+watch(selectedImageIndex, async (newIndex) => {
+  if (newIndex === null) {
+    currentImageBase64.value = null;
+    loadingImage.value = false;
+    return;
+  }
+  await loadCurrentImage();
+});
+
+// 键盘事件监听
+function handleKeydown(event) {
+  if (!showModal.value) return;
+
+  switch(event.key) {
+    case 'Escape':
+      closeModal();
+      break;
+    case 'ArrowRight':
+      nextImage();
+      break;
+    case 'ArrowLeft':
+      prevImage();
+      break;
+  }
+}
+
+// 添加全局键盘事件监听
+document.addEventListener('keydown', handleKeydown);
+
+// 组件卸载时移除事件监听
+onUnmounted(() => {
+  document.removeEventListener('keydown', handleKeydown);
+});
 
 async function fetchPosts() {
   loading.value = true;
@@ -22,11 +133,11 @@ async function fetchPosts() {
       limit: limit.value,
       page: page.value
     });
-
+  console.log(posts)
     // 将posts转换为images格式
     posts.forEach(post => {
       // 选择最佳图片URL：优先使用sample_url，然后file_url，最后preview_url
-      let imageUrl = post.sample_url || post.file_url || post.preview_url;
+      let imageUrl = post.preview_url;
 
       // 如果URL以https开头且遇到SSL问题，可以尝试转换为http
       // 注意：这可能会降低安全性，但可以解决某些证书问题
@@ -40,7 +151,9 @@ async function fetchPosts() {
         score: post.score,
         dimensions: `${post.width}x${post.height}`,
         // 保存备用URL用于错误回退
-        fallbackUrl: post.file_url || post.preview_url || post.jpeg_url
+        fallbackUrl: post.file_url || post.preview_url || post.jpeg_url,
+        // 大图URL用于模态框显示
+        largeUrl: post.file_url
       });
     });
   } catch (err) {
@@ -106,8 +219,8 @@ fetchPosts();
         <h3>Fetched Images ({{ images.length }}):</h3>
         <div class="images-grid">
           <div v-for="(img, index) in images" :key="index" class="image-item">
-            {{ img.src }}
-            <!-- <img :src="img.src" :alt="img.alt" @error="handleImageError($event, index)" class="extracted-image" /> -->
+            <!-- {{ img.src }} -->
+            <img :src="img.src" :alt="img.alt" class="extracted-image" @error="handleImageError($event, index)" @click="openImageModal(index)" style="cursor: pointer;" />
             <p class="image-info">{{ img.alt.length > 50 ? img.alt.substring(0, 50) + '...' : img.alt }}</p>
             <div class="image-meta">
               <span class="image-rating" :class="'rating-' + img.rating">{{ img.rating }}</span>
@@ -121,6 +234,28 @@ fetchPosts();
       
       <div v-if="images.length === 0 && !loading" class="no-images-message">
         No images found.
+      </div>
+    </div>
+
+    <!-- 图片模态框 -->
+    <div v-if="showModal" class="image-modal" @click.self="closeModal">
+      <div class="modal-content">
+        <span class="modal-close" @click="closeModal">×</span>
+        <div class="modal-image-container">
+          <div v-if="loadingImage" class="modal-loading">
+            Loading image...
+          </div>
+          <div v-else-if="currentImageBase64" class="modal-image-wrapper">
+            <img :src="currentImageBase64" :alt="selectedImage.alt" class="modal-image" />
+          </div>
+          <div v-else class="modal-error">
+            Failed to load image.
+          </div>
+        </div>
+        <div class="modal-navigation">
+          <span class="nav-button prev-button" @click="prevImage">‹</span>
+          <span class="nav-button next-button" @click="nextImage">›</span>
+        </div>
       </div>
     </div>
   </main>
@@ -326,6 +461,171 @@ pre {
   text-align: center;
 }
 
+/* 图片模态框样式 */
+.image-modal {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  background-color: rgba(0, 0, 0, 0.9);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+  padding: 20px;
+  box-sizing: border-box;
+}
+
+.modal-content {
+  position: relative;
+  width: 90%;
+  height: 90%;
+  background-color: white;
+  border-radius: 12px;
+  display: flex;
+  flex-direction: column;
+  box-shadow: 0 10px 40px rgba(0, 0, 0, 0.5);
+}
+
+.modal-close {
+  position: absolute;
+  top: 15px;
+  right: 15px;
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+  background-color: rgba(0, 0, 0, 0.7);
+  color: white;
+  border: none;
+  font-size: 24px;
+  font-weight: bold;
+  cursor: pointer;
+  z-index: 10;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: background-color 0.2s;
+}
+
+.modal-close:hover {
+  background-color: rgba(0, 0, 0, 0.9);
+}
+
+.modal-image-container {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+  padding: 20px;
+  height: 80vh;
+  background-color: #f5f5f5;
+}
+
+.modal-loading,
+.modal-error {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 300px;
+  color: #666;
+  font-size: 18px;
+}
+
+.modal-image-wrapper {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  height: 80vh;
+}
+
+.modal-image {
+  width: 1000px;
+  height: 100%;
+  object-fit: contain;
+  border-radius: 8px;
+}
+
+.modal-info {
+  padding: 20px;
+  background-color: white;
+  border-top: 1px solid #e0e0e0;
+}
+
+.modal-tags {
+  margin: 0 0 10px 0;
+  font-size: 16px;
+  font-weight: 500;
+  color: #333;
+  word-break: break-word;
+}
+
+.modal-meta {
+  display: flex;
+  gap: 15px;
+  align-items: center;
+  margin-bottom: 10px;
+  font-size: 14px;
+}
+
+.modal-rating {
+  padding: 4px 8px;
+  border-radius: 4px;
+  font-weight: bold;
+  text-transform: uppercase;
+  font-size: 12px;
+}
+
+.modal-score {
+  color: #666;
+}
+
+.modal-dimensions {
+  color: #666;
+}
+
+.modal-current-index {
+  margin: 0;
+  font-size: 14px;
+  color: #888;
+  text-align: center;
+}
+
+.modal-navigation {
+  position: absolute;
+  top: 50%;
+  left: 0;
+  right: 0;
+  display: flex;
+  justify-content: space-between;
+  transform: translateY(-50%);
+  pointer-events: none;
+  padding: 0 20px;
+}
+
+.nav-button {
+  pointer-events: auto;
+  width: 50px;
+  height: 50px;
+  border-radius: 50%;
+  background-color: rgba(0, 0, 0, 0.7);
+  color: white;
+  border: none;
+  font-size: 30px;
+  font-weight: bold;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: background-color 0.2s;
+}
+
+.nav-button:hover {
+  background-color: rgba(0, 0, 0, 0.9);
+}
+
 /* 合并所有暗色主题样式 */
 @media (prefers-color-scheme: dark) {
   :root {
@@ -386,9 +686,60 @@ pre {
     color: #ffffff;
     background-color: #0f0f0f98;
   }
-  
+
   button:active {
     background-color: #0f0f0f69;
+  }
+
+  /* 暗色主题下的模态框样式 */
+  .image-modal {
+    background-color: rgba(0, 0, 0, 0.95);
+  }
+
+  .modal-content {
+    background-color: #2d2d2d;
+    border-color: #404040;
+  }
+
+  .modal-image-container {
+    background-color: #1a1a1a;
+  }
+
+  .modal-loading,
+  .modal-error {
+    color: #aaa;
+  }
+
+  .modal-info {
+    background-color: #2d2d2d;
+    border-top-color: #404040;
+  }
+
+  .modal-tags {
+    color: #f0f0f0;
+  }
+
+  .modal-meta {
+    color: #ccc;
+  }
+
+  .modal-score,
+  .modal-dimensions {
+    color: #aaa;
+  }
+
+  .modal-current-index {
+    color: #888;
+  }
+
+  .modal-close,
+  .nav-button {
+    background-color: rgba(255, 255, 255, 0.2);
+  }
+
+  .modal-close:hover,
+  .nav-button:hover {
+    background-color: rgba(255, 255, 255, 0.3);
   }
 }
 
