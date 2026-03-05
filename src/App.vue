@@ -1,10 +1,12 @@
 <script setup>
-import { ref, computed, onUnmounted, watch } from "vue";
+import { ref, computed, onUnmounted, watch, onMounted } from "vue";
 import { invoke } from "@tauri-apps/api/core";
+import { download } from "@tauri-apps/plugin-upload";
+import { save } from "@tauri-apps/plugin-dialog";
+import { downloadDir, join } from "@tauri-apps/api/path";
+import { ElMessage } from 'element-plus'
 
 const tags = ref("");
-const limit = ref(20);
-const page = ref(1);
 const images = ref([]);
 const loading = ref(false);
 const error = ref("");
@@ -13,8 +15,16 @@ const currentImageBase64 = ref(null);
 const loadingImage = ref(false);
 const imageCache = ref({}); // URL -> base64 字符串的缓存
 
+const currentPage = ref(1);
+const pageSize = ref(20);
+
+const nsfwModel = ref(false);
+
 const selectedImage = computed(() => {
-  if (selectedImageIndex.value === null || !images.value[selectedImageIndex.value]) {
+  if (
+    selectedImageIndex.value === null ||
+    !images.value[selectedImageIndex.value]
+  ) {
     return null;
   }
   return images.value[selectedImageIndex.value];
@@ -38,7 +48,8 @@ function nextImage() {
 
 function prevImage() {
   if (selectedImageIndex.value === null) return;
-  const prevIndex = (selectedImageIndex.value - 1 + images.value.length) % images.value.length;
+  const prevIndex =
+    (selectedImageIndex.value - 1 + images.value.length) % images.value.length;
   selectedImageIndex.value = prevIndex;
 }
 
@@ -57,7 +68,10 @@ async function loadImageAsBase64(url) {
     const base64String = await invoke("fetch_image_as_base64", { url });
     // 存储到缓存
     imageCache.value[url] = base64String;
-    console.log("Image fetched successfully, base64 length:", base64String.length);
+    console.log(
+      "Image fetched successfully, base64 length:",
+      base64String.length
+    );
     return base64String;
   } catch (err) {
     console.error("Failed to fetch image as base64:", err);
@@ -68,14 +82,9 @@ async function loadImageAsBase64(url) {
 }
 
 async function loadCurrentImage() {
-  if (!selectedImage.value) {
-    currentImageBase64.value = null;
-    return;
-  }
-
+  currentImageBase64.value = null;
   const url = selectedImage.value.largeUrl;
   if (!url) {
-    currentImageBase64.value = null;
     return;
   }
 
@@ -84,6 +93,26 @@ async function loadCurrentImage() {
     currentImageBase64.value = `data:image/jpeg;base64,${base64}`;
   } else {
     currentImageBase64.value = null;
+  }
+}
+async function downloadFile(img) {
+  let picture = img.value || img; // 兼容直接传入图片对象或ref对象
+  console.log("picture:", picture.largeUrl);
+  const defaultDownloadDir = await downloadDir();
+  console.log("Default download directory:", defaultDownloadDir);
+  // 关键修复：await join 的返回值
+  const savePath = await join(
+    defaultDownloadDir,
+    picture.md5 + "." + picture.file_ext
+  );
+  try {
+    await download(
+      picture.largeUrl, // 文件下载 URL
+      savePath, // 本地保存路径
+      { "User-Agent": "Tauri App" } // 可选的请求头（可选）
+    );
+  } catch (error) {
+    console.error("下载失败:", error);
   }
 }
 
@@ -101,25 +130,25 @@ watch(selectedImageIndex, async (newIndex) => {
 function handleKeydown(event) {
   if (!showModal.value) return;
 
-  switch(event.key) {
-    case 'Escape':
+  switch (event.key) {
+    case "Escape":
       closeModal();
       break;
-    case 'ArrowRight':
+    case "ArrowRight":
       nextImage();
       break;
-    case 'ArrowLeft':
+    case "ArrowLeft":
       prevImage();
       break;
   }
 }
 
 // 添加全局键盘事件监听
-document.addEventListener('keydown', handleKeydown);
+document.addEventListener("keydown", handleKeydown);
 
 // 组件卸载时移除事件监听
 onUnmounted(() => {
-  document.removeEventListener('keydown', handleKeydown);
+  document.removeEventListener("keydown", handleKeydown);
 });
 
 async function fetchPosts() {
@@ -130,12 +159,12 @@ async function fetchPosts() {
   try {
     const posts = await invoke("fetch_posts", {
       tags: tags.value,
-      limit: limit.value,
-      page: page.value
+      limit: pageSize.value,
+      page: currentPage.value,
     });
-  console.log(posts)
+    console.log(posts);
     // 将posts转换为images格式
-    posts.forEach(post => {
+    posts.forEach((post) => {
       // 选择最佳图片URL：优先使用sample_url，然后file_url，最后preview_url
       let imageUrl = post.preview_url;
 
@@ -144,22 +173,44 @@ async function fetchPosts() {
       // const fallbackUrl = imageUrl.replace('https://', 'http://');
 
       images.value.push({
+        ...post,
         src: imageUrl,
         alt: post.tags,
-        // 添加额外信息用于显示
-        rating: post.rating,
-        score: post.score,
+        created_at: formatTimestamp(post.created_at, "datetime"),
         dimensions: `${post.width}x${post.height}`,
-        // 保存备用URL用于错误回退
-        fallbackUrl: post.file_url || post.preview_url || post.jpeg_url,
         // 大图URL用于模态框显示
-        largeUrl: post.file_url
+        largeUrl: post.file_url,
       });
     });
   } catch (err) {
     error.value = err.message || String(err);
   } finally {
     loading.value = false;
+  }
+}
+function formatTimestamp(timestamp, format = "time") {
+  const date = new Date(timestamp * 1000);
+
+  const pad = (num) => num.toString().padStart(2, "0");
+
+  const hours = pad(date.getHours());
+  const minutes = pad(date.getMinutes());
+  const seconds = pad(date.getSeconds());
+  const year = date.getFullYear();
+  const month = pad(date.getMonth() + 1);
+  const day = pad(date.getDate());
+
+  switch (format) {
+    case "time":
+      return `${hours}:${minutes}:${seconds}`;
+    case "date":
+      return `${year}-${month}-${day}`;
+    case "datetime":
+      return `${year}-${month}-${day} ${hours}:${minutes}:${seconds}`;
+    case "compact":
+      return `${year}${month}${day}${hours}${minutes}${seconds}`;
+    default:
+      return `${hours}:${minutes}:${seconds}`;
   }
 }
 
@@ -177,64 +228,86 @@ function handleImageError(event, index) {
   }
 
   // 如果仍然失败，尝试将HTTPS转换为HTTP
-  if (img.src && img.src.startsWith('https://')) {
-    const httpUrl = img.src.replace('https://', 'http://');
+  if (img.src && img.src.startsWith("https://")) {
+    const httpUrl = img.src.replace("https://", "http://");
     console.log(`Trying HTTP URL for image ${index}: ${httpUrl}`);
     event.target.src = httpUrl;
     return;
   }
 
   // 最后使用占位符图片
-  event.target.src = 'https://via.placeholder.com/200x150?text=Image+Failed+to+Load';
+  event.target.src =
+    "https://via.placeholder.com/200x150?text=Image+Failed+to+Load";
 }
+onMounted(() => {
+  fetchPosts();
+});
 
-fetchPosts();
-
+const handleSizeChange = (val) => {
+  console.log(`${val} items per page`);
+  pageSize.value = val;
+  fetchPosts();
+};
+const handleCurrentChange = (val) => {
+  console.log(`current page: ${val}`);
+  currentPage.value = val;
+  fetchPosts();
+};
 </script>
 
 <template>
   <main class="container">
-    
-  
     <div class="section">
-      <h2>Yande.re Image Fetcher</h2>
-      <form class="row" @submit.prevent="fetchPosts">
-        <input id="tags-input" v-model="tags" placeholder="Enter tags (e.g., cute cat)" style="flex: 1; margin-right: 10px;" />
-        <button type="submit" :disabled="loading">
-          {{ loading ? 'Fetching...' : 'Fetch Images' }}
-        </button>
-      </form>
-      <div class="row" style="margin-top: 10px;">
-        <input type="number" v-model.number="limit" placeholder="Limit" style="width: 80px; margin-right: 10px;" min="1" max="100" />
-        <input type="number" v-model.number="page" placeholder="Page" style="width: 80px;" min="1" />
-      </div>
-      
+      <el-form inline label-width="auto">
+        <el-form-item label="Tags">
+          <el-input v-model="tags" placeholder="Enter tags (e.g., cute cat)" />
+        </el-form-item>
+        <el-form-item>
+          <el-button type="primary" @click="fetchPosts" :loading="loading">
+            {{ loading ? "Fetching..." : "Fetch Images" }}
+          </el-button>
+          <!-- <el-switch v-model="nsfwModel"></el-switch> -->
+        </el-form-item>
+      </el-form>
+
       <div v-if="error" class="error-message">
         {{ error }}
       </div>
-      
-      
-      
+
       <div v-if="images.length > 0" class="images-container">
-        <h3>Fetched Images ({{ images.length }}):</h3>
         <div class="images-grid">
           <div v-for="(img, index) in images" :key="index" class="image-item">
             <!-- {{ img.src }} -->
-            <img :src="img.src" :alt="img.alt" class="extracted-image" @error="handleImageError($event, index)" @click="openImageModal(index)" style="cursor: pointer;" />
-            <p class="image-info">{{ img.alt.length > 50 ? img.alt.substring(0, 50) + '...' : img.alt }}</p>
+            <img
+              :src="img.src"
+              :alt="img.alt"
+              class="extracted-image"
+              @error="handleImageError($event, index)"
+              @click="openImageModal(index)"
+              style="cursor: pointer"
+            />
             <div class="image-meta">
-              <span class="image-rating" :class="'rating-' + img.rating">{{ img.rating }}</span>
-              <span class="image-score">Score: {{ img.score }}</span>
-              <span class="image-dimensions">{{ img.dimensions }}</span>
+              <span class="image-rating" :class="'rating-' + img.rating">{{
+                img.rating
+              }}</span>
+              <span class="image-score">Time: {{ img.created_at }}</span>
+              <span class="download" @click="downloadFile(img)">下载原图</span>
             </div>
-            <p class="image-src">{{ img.src }}</p>
           </div>
         </div>
       </div>
-      
+
       <div v-if="images.length === 0 && !loading" class="no-images-message">
         No images found.
       </div>
+      <el-pagination
+        v-model:current-page="currentPage"
+        v-model:page-size="pageSize"
+        layout="total, size, prev, pager, next, jumper"
+        :total="1000"
+        @size-change="handleSizeChange"
+        @current-change="handleCurrentChange"
+      />
     </div>
 
     <!-- 图片模态框 -->
@@ -242,15 +315,25 @@ fetchPosts();
       <div class="modal-content">
         <span class="modal-close" @click="closeModal">×</span>
         <div class="modal-image-container">
-          <div v-if="loadingImage" class="modal-loading">
-            Loading image...
+          <div
+            v-if="loadingImage"
+            class="modal-loading"
+            v-loading="loadingImage"
+          >
+            <img
+              :src="images[selectedImageIndex].src"
+              :alt="selectedImage.alt"
+              class="modal-image"
+            />
           </div>
           <div v-else-if="currentImageBase64" class="modal-image-wrapper">
-            <img :src="currentImageBase64" :alt="selectedImage.alt" class="modal-image" />
+            <img
+              :src="currentImageBase64"
+              :alt="selectedImage.alt"
+              class="modal-image"
+            />
           </div>
-          <div v-else class="modal-error">
-            Failed to load image.
-          </div>
+          <div v-else class="modal-error">Failed to load image.</div>
         </div>
         <div class="modal-navigation">
           <span class="nav-button prev-button" @click="prevImage">‹</span>
@@ -280,7 +363,6 @@ fetchPosts();
 
 .container {
   margin: 0;
-  padding-top: 10vh;
   display: flex;
   flex-direction: column;
   justify-content: center;
@@ -290,38 +372,6 @@ fetchPosts();
 .row {
   display: flex;
   justify-content: center;
-}
-
-input,
-button {
-  border-radius: 8px;
-  border: 1px solid transparent;
-  padding: 0.6em 1.2em;
-  font-size: 1em;
-  font-weight: 500;
-  font-family: inherit;
-  color: #0f0f0f;
-  background-color: #ffffff;
-  transition: border-color 0.25s;
-  box-shadow: 0 2px 2px rgba(0, 0, 0, 0.2);
-}
-
-button {
-  cursor: pointer;
-}
-
-button:hover {
-  border-color: #396cd8;
-}
-
-button:active {
-  border-color: #396cd8;
-  background-color: #e8e8e8;
-}
-
-input,
-button {
-  outline: none;
 }
 
 .section {
@@ -365,7 +415,7 @@ pre {
 }
 
 .images-container {
-  margin-top: 30px;
+  margin: 20px 0;
 }
 
 .images-grid {
@@ -554,14 +604,6 @@ pre {
   border-top: 1px solid #e0e0e0;
 }
 
-.modal-tags {
-  margin: 0 0 10px 0;
-  font-size: 16px;
-  font-weight: 500;
-  color: #333;
-  word-break: break-word;
-}
-
 .modal-meta {
   display: flex;
   gap: 15px;
@@ -636,12 +678,12 @@ pre {
   .section {
     background-color: rgba(30, 30, 30, 0.5);
   }
-  
+
   .image-item {
     background-color: #2d2d2d;
     border-color: #404040;
   }
-  
+
   .image-info {
     color: #f0f0f0;
   }
@@ -661,30 +703,24 @@ pre {
   .image-src {
     color: #bbb;
   }
-  
+
   .parsing-message {
     background-color: #1a237e;
     color: #90caf9;
   }
-  
+
   .no-images-message {
     background-color: #2d2d2d;
     color: #bbb;
   }
-  
+
   pre {
     background-color: #2d2d2d;
     color: #f8f8f2;
   }
-  
+
   .error-message {
     background-color: rgba(229, 57, 53, 0.15);
-  }
-
-  input,
-  button {
-    color: #ffffff;
-    background-color: #0f0f0f98;
   }
 
   button:active {
@@ -742,5 +778,9 @@ pre {
     background-color: rgba(255, 255, 255, 0.3);
   }
 }
-
+.download {
+  color: #2196f3;
+  cursor: pointer;
+  font-size: 12px;
+}
 </style>

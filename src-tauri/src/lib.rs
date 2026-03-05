@@ -1,5 +1,9 @@
 // Learn more about Tauri commands at https://tauri.app/develop/calling-rust/
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
+use reqwest::{Client, header};
+mod crypto;  // 引入加密模块
+use crypto::{danbooru_hash, danbooru_verify};
 
 #[derive(Debug, Serialize, Deserialize)]
 // {
@@ -132,9 +136,15 @@ async fn fetch_html(url: &str) -> Result<String, String> {
     }
 }
 
+
 #[tauri::command]
 async fn fetch_posts(tags: Option<String>, limit: Option<u32>, page: Option<u32>) -> Result<Vec<Post>, String> {
     // 创建一个基本的客户端配置
+    // let username = "xukejian";
+    // let password = "xukejian123~";
+
+    // let password_hash = danbooru_hash(&password);
+
     let client = reqwest::Client::builder()
         .user_agent("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/114.0.0.0 Safari/537.36")
         .danger_accept_invalid_certs(true) // 忽略证书错误
@@ -143,30 +153,28 @@ async fn fetch_posts(tags: Option<String>, limit: Option<u32>, page: Option<u32>
 
     // 构建API URL
     let mut api_url = "https://yande.re/post.json".to_string();
-    let mut query_params = vec![];
-
+    // let mut query_params = vec![];
+    let mut query: HashMap<&str, String> = HashMap::new();
+    //rating:e 
     if let Some(t) = tags {
-        if !t.trim().is_empty() {
-            query_params.push(format!("tags={}", urlencoding::encode(&t)));
-        }
+        query.insert("tags", format!("{}", t));
     }
 
     if let Some(l) = limit {
-        query_params.push(format!("limit={}", l));
+        query.insert("limit", l.to_string());
     }
 
     if let Some(p) = page {
-        query_params.push(format!("page={}", p));
+        query.insert("page", p.to_string());
     }
+    // query.insert("login", username.to_string());
+    // query.insert("password_hash", password_hash);
 
-    if !query_params.is_empty() {
-        api_url.push('?');
-        api_url.push_str(&query_params.join("&"));
-    }
-    println!("Constructed API URL: {}", api_url);
+    println!("Query parameters: {:?}", query);
     // 发送请求
     match client.get(&api_url)
         .header("Accept", "application/json")
+        .query(&query)
         .send().await {
         Ok(response) => {
             if response.status().is_success() {
@@ -229,10 +237,13 @@ async fn fetch_image_as_base64(url: String) -> Result<String, String> {
     }
 }
 
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
+        .plugin(tauri_plugin_dialog::init())
+        .plugin(tauri_plugin_upload::init())
         .invoke_handler(tauri::generate_handler![greet, fetch_html, fetch_posts, fetch_image_as_base64])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

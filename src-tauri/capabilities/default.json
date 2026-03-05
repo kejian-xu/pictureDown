@@ -5,6 +5,10 @@
   "windows": ["main"],
   "permissions": [
     "core:default",
-    "opener:default"
+    "opener:default",
+    "upload:allow-download",
+    "dialog:allow-save",
+    "dialog:allow-open"
   ]
 }
+

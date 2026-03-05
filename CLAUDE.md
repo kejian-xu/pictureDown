@@ -10,6 +10,8 @@ PicureDown 是一个基于 Tauri + Vue 3 的桌面应用程序，专门用于从
 - 显示图片评分、分数、尺寸等元数据
 - 智能图片URL选择（优先使用CDN链接）
 - 多级错误回退机制（解决SSL证书问题）
+- **点击缩略图浏览大图**（支持键盘导航：←/→切换，ESC关闭）
+- **Base64图片缓存**（解决跨域和SSL证书问题）
 - 响应式设计，支持暗色主题
 
 ## 技术栈
@@ -35,11 +37,12 @@ tauri = { version = "2" }        // Tauri核心
 reqwest = { version = "0.11" }   // HTTP客户端
 serde = { version = "1" }        // JSON序列化
 urlencoding = "2"                // URL编码
+base64 = "0.21"                  // Base64编码解码
 ```
 
 ## 项目结构
 
-```
+```text
 picureDown/
 ├── src/                          # 前端源代码
 │   ├── main.js                   # Vue应用入口
@@ -58,6 +61,7 @@ picureDown/
 ## 运行指南
 
 ### 开发环境
+
 ```bash
 # 安装前端依赖
 npm install
@@ -71,6 +75,7 @@ cargo tauri dev
 ```
 
 ### 生产构建
+
 ```bash
 # 构建应用
 npm run tauri build
@@ -78,6 +83,7 @@ npm run tauri build
 ```
 
 ### 开发服务器（仅前端）
+
 ```bash
 npm run dev      # 访问 http://localhost:1420
 ```
@@ -85,29 +91,46 @@ npm run dev      # 访问 http://localhost:1420
 ## 开发指南
 
 ### 前端开发 (Vue 3)
+
 - **核心组件**：[src/App.vue](src/App.vue)
-- **状态管理**：使用 Vue 3 Composition API (`ref`, `reactive`)
+- **状态管理**：使用 Vue 3 Composition API (`ref`, `reactive`, `computed`, `watch`)
 - **API调用**：通过 `@tauri-apps/api/core` 调用 Rust 命令
+- **图片缓存**：使用内存缓存存储Base64格式的图片数据
+- **键盘导航**：支持ESC关闭、←/→切换图片的键盘快捷键
 - **样式**：内联样式 + CSS类，支持暗色主题
 
 ### 后端开发 (Rust)
+
 - **核心文件**：[src-tauri/src/lib.rs](src-tauri/src/lib.rs)
 - **Tauri命令**：使用 `#[tauri::command]` 宏定义
-- **HTTP请求**：通过 `reqwest` 库发送请求
+- **HTTP请求**：通过 `reqwest` 库发送请求（忽略SSL证书错误）
+- **Base64编码**：使用 `base64` 库将图片数据编码为字符串
 - **错误处理**：使用 `Result<T, String>` 返回类型
+- **日志输出**：使用 `println!` 输出调试信息
 
 ### API调用流程
+
 1. 前端调用 `invoke("fetch_posts", { tags, limit, page })`
 2. Rust后端构建API URL：`https://yande.re/post.json?tags=...`
 3. 发送HTTP请求并解析JSON响应
 4. 返回 `Post` 结构体数组给前端
 5. 前端转换数据并渲染图片网格
 
+### 大图浏览流程
+
+1. 用户点击缩略图，调用 `openImageModal(index)`
+2. 前端检查缓存中是否有该图片的Base64数据
+3. 如果未缓存，调用 `fetch_image_as_base64` 命令下载图片
+4. Rust后端下载图片并返回Base64编码
+5. 前端缓存Base64数据并显示图片
+6. 用户可以使用键盘（←/→）或导航按钮切换图片
+
 ## API参考
 
 ### Rust后端命令
 
 #### `fetch_posts(tags: Option<String>, limit: Option<u32>, page: Option<u32>) -> Result<Vec<Post>, String>`
+
 从 yande.re 获取图片数据。
 
 **参数：**
@@ -117,10 +140,29 @@ npm run dev      # 访问 http://localhost:1420
 
 **返回：** `Post` 结构体数组
 
+#### `fetch_image_as_base64(url: String) -> Result<String, String>`
+
+下载图片并返回Base64编码字符串。
+
+**参数：**
+
+- `url`: 图片URL
+
+**返回：** Base64编码的图片数据字符串
+
+**功能：**
+
+- 使用忽略SSL证书错误的HTTP客户端
+- 下载图片原始字节数据
+- 使用Base64编码转换为字符串
+- 包含详细日志输出用于调试
+
 #### `fetch_html(url: &str) -> Result<String, String>`
+
 抓取网页HTML内容（保留功能，当前未使用）。
 
 #### `greet(name: &str) -> String`
+
 测试命令，返回问候语。
 
 ### Post 数据结构
@@ -239,5 +281,11 @@ cd src-tauri && cargo check
 ---
 
 **最后更新**：2026-03-02
-**项目状态**：开发中
+**更新内容**：
+- 添加点击缩略图浏览大图功能（支持键盘导航）
+- 实现Base64图片缓存系统（解决SSL证书和跨域问题）
+- 完善Post数据结构以处理API返回的null值
+- 添加详细的调试日志输出
+
+**项目状态**：功能完整，稳定运行
 **主要维护者**：项目开发者
