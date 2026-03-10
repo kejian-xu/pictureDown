@@ -1,102 +1,214 @@
 // Learn more about Tauri commands at https://tauri.app/develop/calling-rust/
 use serde::{Deserialize, Serialize};
+use serde_json::Value;
 use std::collections::HashMap;
 use reqwest::{Client, header};
-mod crypto;  // 引入加密模块
-use crypto::{danbooru_hash, danbooru_verify};
+use quick_xml::de::from_str;
+
 
 #[derive(Debug, Serialize, Deserialize)]
-// {
-//     "id": 1255839,
-//     "tags": "blue_archive halo sorasaki_hina tagme",
-//     "created_at": 1772443117,
-//     "updated_at": 1772443117,
-//     "creator_id": 294900,
-//     "approver_id": null,
-//     "author": "Aleax",
-//     "change": 6492274,
-//     "source": "https://www.pixiv.net/artworks/141370841",
-//     "score": 1,
-//     "md5": "9bdd440170b23dad4d950a265449ffd2",
-//     "file_size": 7123727,
-//     "file_ext": "jpg",
-//     "file_url": "https://files.yande.re/image/9bdd440170b23dad4d950a265449ffd2/yande.re%201255839%20blue_archive%20halo%20sorasaki_hina%20tagme.jpg",
-//     "is_shown_in_index": true,
-//     "preview_url": "https://assets.yande.re/data/preview/9b/dd/9bdd440170b23dad4d950a265449ffd2.jpg",
-//     "preview_width": 150,
-//     "preview_height": 116,
-//     "actual_preview_width": 300,
-//     "actual_preview_height": 231,
-//     "sample_url": "https://files.yande.re/sample/9bdd440170b23dad4d950a265449ffd2/yande.re%201255839%20sample%20blue_archive%20halo%20sorasaki_hina%20tagme.jpg",
-//     "sample_width": 1500,
-//     "sample_height": 1155,
-//     "sample_file_size": 389491,
-//     "jpeg_url": "https://files.yande.re/image/9bdd440170b23dad4d950a265449ffd2/yande.re%201255839%20blue_archive%20halo%20sorasaki_hina%20tagme.jpg",
-//     "jpeg_width": 3896,
-//     "jpeg_height": 3000,
-//     "jpeg_file_size": 0,
-//     "rating": "s",
-//     "is_rating_locked": false,
-//     "has_children": false,
-//     "parent_id": null,
-//     "status": "active",
-//     "is_pending": false,
-//     "width": 3896,
-//     "height": 3000,
-//     "is_held": true,
-//     "frames_pending_string": "",
-//     "frames_pending": [],
-//     "frames_string": "",
-//     "frames": [],
-//     "is_note_locked": false,
-//     "last_noted_at": 0,
-//     "last_commented_at": 0
-// }
-struct Post {
-    id: u32,
-    tags: String,
-    created_at: i64,
-    updated_at: i64,
-    creator_id: Option<u32>,
-    approver_id: Option<u32>,
-    author: String,
-    change: u32,
-    source: String,
-    score: i32,
-    md5: String,
-    file_size: u64,
-    file_ext: String,
-    file_url: String,
-    is_shown_in_index: bool,
-    preview_url: String,
-    sample_url: String,
-    sample_width: Option<u32>,
-    sample_height: Option<u32>,
-    sample_file_size: Option<u64>,
-    preview_width: Option<u32>,
-    preview_height: Option<u32>,
-    actual_preview_width: Option<u32>,
-    actual_preview_height: Option<u32>,
-    jpeg_url: String,
-    jpeg_width: Option<u32>,
-    jpeg_height: Option<u32>,
-    jpeg_file_size: u64,
-    rating: String,
-    is_rating_locked: bool,
-    has_children: bool,
-    parent_id: Option<u32>,
-    status: String,
-    is_pending: bool,
-    width: u32,
-    height: u32,
-    is_held: bool,
-    frames_pending_string: String,
-    frames_pending: Vec<serde_json::Value>,
-    frames_string: String,
-    frames: Vec<serde_json::Value>,
-    is_note_locked: bool,
-    last_noted_at: i64,
-    last_commented_at: i64,
+pub struct Post {
+    #[serde(rename = "id")]
+    pub id: u32,
+
+    #[serde(rename = "tags")]
+    pub tags: String,
+
+    #[serde(rename = "created_at")]
+    pub created_at: i64,
+
+    #[serde(rename = "updated_at")]
+    pub updated_at: i64,
+
+    #[serde(rename = "creator_id")]
+    #[serde(deserialize_with = "empty_string_as_none")]
+    pub creator_id: Option<u32>,
+
+    #[serde(rename = "approver_id")]
+    #[serde(deserialize_with = "empty_string_as_none")]
+    pub approver_id: Option<u32>,
+
+    #[serde(rename = "author")]
+    pub author: String,
+
+    #[serde(rename = "change")]
+    pub change: u32,
+
+    #[serde(rename = "source")]
+    pub source: String,
+
+    #[serde(rename = "score")]
+    pub score: i32,
+
+    #[serde(rename = "md5")]
+    pub md5: String,
+
+    #[serde(rename = "file_size")]
+    pub file_size: u64,
+
+    #[serde(rename = "file_ext")]
+    pub file_ext: String,
+
+    #[serde(rename = "file_url")]
+    pub file_url: String,
+
+    #[serde(rename = "is_shown_in_index")]
+    #[serde(deserialize_with = "string_to_bool")]
+    pub is_shown_in_index: bool,
+
+    #[serde(rename = "preview_url")]
+    pub preview_url: String,
+
+    #[serde(rename = "sample_url")]
+    pub sample_url: String,
+
+    #[serde(rename = "sample_width")]
+    #[serde(deserialize_with = "empty_string_as_none")]
+    pub sample_width: Option<u32>,
+
+    #[serde(rename = "sample_height")]
+    #[serde(deserialize_with = "empty_string_as_none")]
+    pub sample_height: Option<u32>,
+
+    #[serde(rename = "sample_file_size")]
+    #[serde(deserialize_with = "empty_string_as_none")]
+    pub sample_file_size: Option<u64>,
+
+    #[serde(rename = "preview_width")]
+    #[serde(deserialize_with = "empty_string_as_none")]
+    pub preview_width: Option<u32>,
+
+    #[serde(rename = "preview_height")]
+    #[serde(deserialize_with = "empty_string_as_none")]
+    pub preview_height: Option<u32>,
+
+    #[serde(rename = "actual_preview_width")]
+    #[serde(deserialize_with = "empty_string_as_none")]
+    pub actual_preview_width: Option<u32>,
+
+    #[serde(rename = "actual_preview_height")]
+    #[serde(deserialize_with = "empty_string_as_none")]
+    pub actual_preview_height: Option<u32>,
+
+    #[serde(rename = "jpeg_url")]
+    pub jpeg_url: String,
+
+    #[serde(rename = "jpeg_width")]
+    #[serde(deserialize_with = "empty_string_as_none")]
+    pub jpeg_width: Option<u32>,
+
+    #[serde(rename = "jpeg_height")]
+    #[serde(deserialize_with = "empty_string_as_none")]
+    pub jpeg_height: Option<u32>,
+
+    #[serde(rename = "jpeg_file_size")]
+    pub jpeg_file_size: u64,
+
+    #[serde(rename = "rating")]
+    pub rating: String,
+
+    #[serde(rename = "is_rating_locked")]
+    #[serde(deserialize_with = "string_to_bool")]
+    pub is_rating_locked: bool,
+
+    #[serde(rename = "has_children")]
+    #[serde(deserialize_with = "string_to_bool")]
+    pub has_children: bool,
+
+    #[serde(rename = "parent_id")]
+    #[serde(deserialize_with = "empty_string_as_none")]
+    pub parent_id: Option<u32>,
+
+    #[serde(rename = "status")]
+    pub status: String,
+
+    #[serde(rename = "is_pending")]
+    #[serde(deserialize_with = "string_to_bool")]
+    pub is_pending: bool,
+
+    #[serde(rename = "width")]
+    pub width: u32,
+
+    #[serde(rename = "height")]
+    pub height: u32,
+
+    #[serde(rename = "is_held")]
+    #[serde(deserialize_with = "string_to_bool")]
+    pub is_held: bool,
+
+    #[serde(rename = "frames_pending_string")]
+    pub frames_pending_string: String,
+
+    #[serde(rename = "frames_string")]
+    pub frames_string: String,
+
+    #[serde(rename = "is_note_locked")]
+    #[serde(deserialize_with = "string_to_bool")]
+    pub is_note_locked: bool,
+
+    #[serde(rename = "last_noted_at")]
+    #[serde(deserialize_with = "empty_string_as_none")]
+    pub last_noted_at: Option<i64>,
+
+    #[serde(rename = "last_commented_at")]
+    #[serde(deserialize_with = "empty_string_as_none")]
+    pub last_commented_at: Option<i64>,
+}
+
+// 辅助函数：将空字符串转为 None
+fn empty_string_as_none<'de, D, T>(deserializer: D) -> Result<Option<T>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+    T: std::str::FromStr,
+    T::Err: std::fmt::Display,
+{
+    let s = String::deserialize(deserializer)?;
+    if s.is_empty() {
+        Ok(None)
+    } else {
+        match s.parse::<T>() {
+            Ok(val) => Ok(Some(val)),
+            Err(e) => Err(serde::de::Error::custom(format!("解析错误: {}", e))),
+        }
+    }
+}
+
+// 辅助函数：将字符串 "true"/"false" 转为 bool
+fn string_to_bool<'de, D>(deserializer: D) -> Result<bool, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    let s = String::deserialize(deserializer)?;
+    match s.as_str() {
+        "true" => Ok(true),
+        "false" => Ok(false),
+        _ => Err(serde::de::Error::custom(format!("无效的布尔值: {}", s))),
+    }
+}
+
+// 辅助函数：空字符串转为默认值（空 Vec）
+fn empty_string_as_default<'de, D, T>(deserializer: D) -> Result<T, D::Error>
+where
+    D: serde::Deserializer<'de>,
+    T: Default + serde::Deserialize<'de>,
+{
+    let s = String::deserialize(deserializer)?;
+    if s.is_empty() {
+        Ok(T::default())
+    } else {
+        T::deserialize(serde::de::value::StringDeserializer::new(s))
+    }
+}
+#[derive(Debug, Deserialize, Serialize)]
+pub struct Posts {
+    #[serde(rename = "count")]
+    pub count: i32,
+    #[serde(rename = "offset")]
+    pub offset: i32,
+    #[serde(rename = "post")]
+    #[serde(default)]
+    // pub posts: Vec<Post>,
+     pub posts: Vec<Value>,  // 可以是任何结构
 }
 
 #[tauri::command]
@@ -135,29 +247,24 @@ async fn fetch_html(url: &str) -> Result<String, String> {
         Err(e) => Err(format!("Failed to send request: {}", e)),
     }
 }
-
-
 #[tauri::command]
-async fn fetch_posts(tags: Option<String>, limit: Option<u32>, page: Option<u32>) -> Result<Vec<Post>, String> {
-    // 创建一个基本的客户端配置
-    // let username = "xukejian";
-    // let password = "xukejian123~";
-
-    // let password_hash = danbooru_hash(&password);
+async fn fetch_posts(
+    tags: Option<String>,
+    limit: Option<u32>,
+    page: Option<u32>,
+) -> Result<Posts, String> {
 
     let client = reqwest::Client::builder()
-        .user_agent("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/114.0.0.0 Safari/537.36")
-        .danger_accept_invalid_certs(true) // 忽略证书错误
+        .user_agent("Mozilla/5.0")
         .build()
-        .map_err(|e| format!("Failed to create client: {}", e))?;
+        .map_err(|e| e.to_string())?;
 
-    // 构建API URL
-    let mut api_url = "https://yande.re/post.json".to_string();
-    // let mut query_params = vec![];
+    let api_url = "https://yande.re/post.xml";
+
     let mut query: HashMap<&str, String> = HashMap::new();
-    //rating:e 
+
     if let Some(t) = tags {
-        query.insert("tags", format!("{}", t));
+        query.insert("tags", t);
     }
 
     if let Some(l) = limit {
@@ -167,44 +274,49 @@ async fn fetch_posts(tags: Option<String>, limit: Option<u32>, page: Option<u32>
     if let Some(p) = page {
         query.insert("page", p.to_string());
     }
-    // query.insert("login", username.to_string());
-    // query.insert("password_hash", password_hash);
 
-    println!("Query parameters: {:?}", query);
-    // 发送请求
-    match client.get(&api_url)
-        .header("Accept", "application/json")
+    let response = client
+        .get(api_url)
         .query(&query)
-        .send().await {
-        Ok(response) => {
-            if response.status().is_success() {
-                let text = match response.text().await {
-                    Ok(t) => t,
-                    Err(e) => return Err(format!("Failed to read response text: {}", e)),
-                };
-                println!("Response length: {}", text.len());
-                // Try to parse as JSON
-                match serde_json::from_str::<Vec<Post>>(&text) {
-                    Ok(posts) => Ok(posts),
-                    Err(e) => {
-                        // Print error details and a snippet around the error location
-                        println!("Parse error: {}", e);
-                        let column = e.column();
-                        let start = if column > 50 { column - 50 } else { 0 };
-                        let end = std::cmp::min(text.len(), column + 50);
-                        let snippet = &text[start..end];
-                        println!("Error around column {}: \"{}\"", column, snippet);
-                        Err(format!("Failed to parse JSON: {}", e))
-                    }
-                }
-            } else {
-                Err(format!("Request failed with status: {}", response.status()))
-            }
-        },
-        Err(e) => Err(format!("Failed to send request: {}", e)),
+        .send()
+        .await
+        .map_err(|e| e.to_string())?;
+
+    if !response.status().is_success() {
+        return Err(format!("Request failed: {}", response.status()));
+    }
+
+    let xml = response.text().await.map_err(|e| e.to_string())?;
+    println!("Received XML: {}", xml); // 调试输出
+    debug_find_empty_fields(&xml); // 调试函数，查找空字段
+    let posts: Posts = serde_xml_rs::from_str(&xml).map_err(|e| format!("XML parse error: {}", e))?;
+    Ok(posts)
+}
+fn debug_find_empty_fields(xml: &str) {
+    println!("在 XML 中搜索空字段...");
+    
+    // 查找所有属性模式
+    let re = regex::Regex::new(r#"(\w+)=""#).unwrap();
+    
+    for cap in re.captures_iter(xml) {
+        println!("发现空字段: {}=''", &cap[1]);
+    }
+    
+    // 打印 XML 中所有的属性
+    let attr_re = regex::Regex::new(r#"(\w+)="([^"]*)""#).unwrap();
+    
+    println!("\n所有字段的值:");
+    for cap in attr_re.captures_iter(xml) {
+        let field = &cap[1];
+        let value = &cap[2];
+        
+        if value.is_empty() {
+            println!("⚠️  {}: 空字符串", field);
+        } else {
+            println!("✅ {}: '{}'", field, value);
+        }
     }
 }
-
 #[tauri::command]
 async fn fetch_image_as_base64(url: String) -> Result<String, String> {
     // 创建一个基本的客户端配置

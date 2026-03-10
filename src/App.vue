@@ -157,14 +157,14 @@ async function fetchPosts() {
   images.value = [];
 
   try {
-    const posts = await invoke("fetch_posts", {
+    const res = await invoke("fetch_posts", {
       tags: tags.value,
       limit: pageSize.value,
       page: currentPage.value,
     });
-    console.log(posts);
+    console.log(res);
     // 将posts转换为images格式
-    posts.forEach((post) => {
+    res.post.forEach((post) => {
       // 选择最佳图片URL：优先使用sample_url，然后file_url，最后preview_url
       let imageUrl = post.preview_url;
 

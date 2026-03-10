@@ -86,39 +86,3 @@ pub fn danbooru_hash(password: &str) -> String {
 pub fn danbooru_verify(password: &str, hashed: &str) -> Result<bool> {
     DanbooruHasher::verify_default(password, hashed)
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    
-    #[test]
-    fn test_password_hashing() {
-        let password = "mypassword123";
-        
-        // 测试哈希
-        let hash = danbooru_hash(password).unwrap();
-        println!("密码: {}", password);
-        println!("哈希: {}", hash);
-        
-        // 验证哈希格式（bcrypt 格式）
-        assert!(hash.starts_with("$2"));
-        
-        // 测试验证
-        let is_valid = danbooru_verify(password, &hash).unwrap();
-        assert!(is_valid);
-        
-        // 测试错误密码
-        let is_wrong = danbooru_verify("wrongpassword", &hash).unwrap();
-        assert!(!is_wrong);
-    }
-    
-    #[test]
-    fn test_custom_config() {
-        let hasher = DanbooruHasher::new("custom-salt", 12); // 更高的成本
-        
-        let password = "test123";
-        let hash = hasher.hash_password(password).unwrap();
-        
-        assert!(hasher.verify_password(password, &hash).unwrap());
-    }
-}

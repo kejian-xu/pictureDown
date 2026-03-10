@@ -31,4 +31,6 @@ hex = "0.4"
 anyhow = "1.0"
 tauri-plugin-upload = "2.4.0"
 tauri-plugin-dialog = "2.6.0"
-
+quick-xml = { version = "0.31", features = ["serialize"] }
+serde-xml-rs = "0.6"
+regex = "1.10"
