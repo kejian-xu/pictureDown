@@ -6,6 +6,7 @@ import { save } from "@tauri-apps/plugin-dialog";
 import { downloadDir, join } from "@tauri-apps/api/path";
 import { ElMessage } from 'element-plus'
 import { appCacheDir } from '@tauri-apps/api/path';
+import { debounce,throttle  } from 'lodash-es'
 // import { set, get } from 'tauri-plugin-cache-api';
 
 const tags = ref("");
@@ -18,11 +19,13 @@ const loadingImage = ref(false);
 const urlCache = ref({}); // URL -> blob URL 的缓存
 
 const currentPage = ref(1);
-const pageSize = ref(20);
+const pageSize = ref(50);
 const total = ref(0);
 const downloadFilePath = ref("");
 
 const nsfwModel = ref("");
+
+const isWaterfall = ref(false);
 
 const selectedImage = computed(() => {
   if (
@@ -84,7 +87,7 @@ function prevImage() {
   selectedImageIndex.value = prevIndex;
 }
 
-async function loadImageAsBlob(url) {
+async function loadImage(url) {
   if (!url) return null;
 
   // 检查内存中的 blob URL 缓存
@@ -138,7 +141,7 @@ async function loadCurrentImage() {
     return;
   }
 
-  const imgUrl = await loadImageAsBlob(url);
+  const imgUrl = await loadImage(url);
   if (imgUrl) {
     currentImageUrl.value = imgUrl;
   } else {
@@ -202,6 +205,10 @@ onUnmounted(() => {
   urlCache.value = {};
 });
 
+const handleSearch = throttle(() => {
+  currentPage.value = 1
+  fetchPosts();
+},5000)
 async function fetchPosts() {
   loading.value = true;
   error.value = "";
@@ -219,28 +226,33 @@ async function fetchPosts() {
     // console.log(res);
     total.value = res.count || 0; // 如果后端返回了总数，更新 total
     // 将posts转换为images格式
-    images.value = res.post.map((post) => {
-      // 选择最佳图片URL：优先使用sample_url，然后file_url，最后preview_url
-      let imageUrl = post.preview_url;
+    let arr = res.post.map((post) => {
+        // 选择最佳图片URL：优先使用sample_url，然后file_url，最后preview_url
+        let imageUrl = post.preview_url;
 
-      // 如果URL以https开头且遇到SSL问题，可以尝试转换为http
-      // 注意：这可能会降低安全性，但可以解决某些证书问题
-      // const fallbackUrl = imageUrl.replace('https://', 'http://');
+        // 如果URL以https开头且遇到SSL问题，可以尝试转换为http
+        // 注意：这可能会降低安全性，但可以解决某些证书问题
+        // const fallbackUrl = imageUrl.replace('https://', 'http://');
 
-      return{
-        ...post,
-        src: imageUrl,
-        alt: post.tags,
-        created_at: formatTimestamp(post.created_at, "datetime"),
-        dimensions: `${post.width}x${post.height}`,
-        // 大图URL用于模态框显示
-        largeUrl: post.file_url,
-        loading: false
-      }
-    });
+        return{
+          ...post,
+          src: imageUrl,
+          alt: post.tags,
+          created_at: formatTimestamp(post.created_at, "datetime"),
+          dimensions: `${post.width}x${post.height}`,
+          // 大图URL用于模态框显示
+          largeUrl: post.file_url,
+          loading: false
+        }
+      })
+    if(isWaterfall.value) {
+      images.value = images.value.concat(arr)
+
+    }else {
+      images.value = arr
+      scrollToSection("imagesDev");
+    }
     ElMessage.success("查询成功！");
-    scrollToSection("imagesDev");
-
   } catch (err) {
     error.value = err.message || String(err);
   } finally {
@@ -310,6 +322,13 @@ const handleCurrentChange = (val) => {
   currentPage.value = val;
   fetchPosts();
 };
+
+const waterfallLoad = throttle(() =>{
+  console.log('waterfallLoad')
+    currentPage.value += 1;
+    fetchPosts();
+},10000)
+
 </script>
 
 <template>
@@ -329,8 +348,11 @@ const handleCurrentChange = (val) => {
             </el-select>
           </el-form-item>
           <el-form-item>
-            <el-button icon="search" type="primary" @click="fetchPosts" :loading="loading">
+            <el-button icon="search" type="primary" @click="handleSearch" :loading="loading">
               {{ loading ? "加载中..." : "搜索" }}
+            </el-button>
+            <el-button @click="isWaterfall = !isWaterfall" type="info">
+              {{ isWaterfall ? "网格视图" : "瀑布流" }}
             </el-button>
             <!-- <el-switch v-model="nsfwModel"></el-switch> -->
           </el-form-item>
@@ -342,7 +364,7 @@ const handleCurrentChange = (val) => {
         {{ error }}
       </div>
 
-      <div  class="images-container" v-loading="loading">
+      <div  class="images-container" v-loading="loading" v-if="!isWaterfall">
         <div class="images-grid">
           <div v-for="(img, index) in images" :key="index" class="image-item">
             <!-- {{ img.src }} -->
@@ -354,27 +376,52 @@ const handleCurrentChange = (val) => {
               @click="openImageModal(index)"
               style="cursor: pointer"
             />
-            <div class="image-meta">
+            <div class="image-meta" >
               <span class="image-rating" :class="'rating-' + img.rating">{{
                 img.rating
               }}</span>
               <span class="image-score"><i>尺寸:</i>{{img.dimensions}};<i>时间:</i>{{ img.created_at }}</span>
              
             </div>
-            <div class="image-tags">
+            <div class="image-tags" >
               <el-tag @click="handleTags(tag)" type="primary" v-for="tag in img.tags.split(' ')" :key="tag">{{ tag }}</el-tag>
             </div>
-            <div class="image-download">
+            <div class="image-download" >
               <el-button type="primary" round :loading="img.loading" icon="Download" @click="downloadFile(img)"></el-button>
             </div>
           </div>
         </div>
       </div>
+       <el-scrollbar 
+        v-else
+        height="calc(100vh - 85px)"
+        :distance="10"
+        @end-reached="waterfallLoad"
+  >
+      <div  class="images-container waterfall" >
+        <div class="images-grid " >
+          <div v-for="(img, index) in images" :key="index" class="image-item">
+            <img
+              :src="img.src"
+              :alt="img.alt"
+              class="extracted-image"
+              @error="handleImageError($event, index)"
+              @click="openImageModal(index)"
+              style="cursor: pointer"
+            />
+            <div class="image-download" >
+              <el-button type="primary" round :loading="img.loading" icon="Download" @click="downloadFile(img)"></el-button>
+            </div>
+          </div>
+        </div>
+      </div>
+      </el-scrollbar>
+
 
       <div v-if="images.length === 0 && !loading" class="no-images-message">
         No images found.
       </div>
-      <div class="pagination-container" >
+      <div class="pagination-container" v-if="!isWaterfall" >
          <el-pagination
           v-model:current-page="currentPage"
           v-model:page-size="pageSize"
@@ -494,6 +541,7 @@ pre {
 .images-container {
   margin: 10px 0;
   padding: 0 10px;
+
 }
 
 .images-grid {
@@ -502,6 +550,18 @@ pre {
   gap: 20px;
   margin-top: 20px;
 }
+
+.waterfall .images-grid {
+  display: block;
+  column-count: 8;
+  column-gap: 5px;
+}
+
+.waterfall .image-item {
+  break-inside: avoid;
+  margin-bottom: 5px;
+}
+
 
 .image-item {
   border: 1px solid #e0e0e0;
@@ -524,6 +584,10 @@ pre {
   border-radius: 4px;
   display: block;
   margin: 0 auto 5px;
+}
+.waterfall .extracted-image {
+  width: 100%;
+  height: auto;
 }
 
 .image-info {
@@ -884,6 +948,11 @@ pre {
   right: 10px;
   top: 10px;
   z-index: 1000;
+  opacity: 0;
+  transition: all .3s;
+}
+.image-item:hover .image-download{
+  opacity: 1;
 }
 .pagination-container {
   position: sticky;

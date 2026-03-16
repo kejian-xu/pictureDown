@@ -66,7 +66,7 @@ async fn fetch_posts(
     if let Some(p) = page {
         query.insert("page", p.to_string());
     }
-    println!("query", query);
+    // println!("query", query);
     let response = client
         .get(api_url)
         .query(&query)
