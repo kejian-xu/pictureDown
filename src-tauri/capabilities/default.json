@@ -8,7 +8,10 @@
     "opener:default",
     "upload:allow-download",
     "dialog:allow-save",
-    "dialog:allow-open"
+    "dialog:allow-open",
+    "cache:default",
+    "cache:allow-set",
+    "cache:allow-get"
   ]
 }
 

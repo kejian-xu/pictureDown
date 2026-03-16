@@ -1,8 +1,8 @@
-# CLAUDE.md - PicureDown (yande.re图片抓取工具)
+# CLAUDE.md - PictureDown (yande.re图片抓取工具)
 
 ## 项目概述
 
-PicureDown 是一个基于 Tauri + Vue 3 的桌面应用程序，专门用于从 yande.re 图片网站搜索和下载图片。应用通过调用 yande.re 的公开 API 获取图片数据，并提供友好的界面进行浏览和下载。
+PictureDown 是一个基于 Tauri + Vue 3 的桌面应用程序，专门用于从 yande.re 图片网站搜索和下载图片。应用通过调用 yande.re 的公开 API 获取图片数据，并提供友好的界面进行浏览和下载。
 
 **主要功能：**
 - 通过 yande.re API 搜索图片（支持标签过滤）
@@ -48,7 +48,7 @@ tauri-plugin-opener = "2"        // 打开外部链接插件
 ## 项目结构
 
 ```text
-picureDown/
+PictureDown/
 ├── src/                          # 前端源代码
 │   ├── main.js                   # Vue应用入口
 │   └── App.vue                   # 主应用组件

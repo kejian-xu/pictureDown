@@ -2,5 +2,5 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 fn main() {
-    picuredown_lib::run()
+    picturedown_lib::run()
 }

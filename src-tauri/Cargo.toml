@@ -1,8 +1,8 @@
 [package]
-name = "picuredown"
+name = "picturedown"
 version = "0.1.0"
 description = "A Tauri App"
-authors = ["you"]
+authors = ["xukejian"]
 edition = "2021"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
@@ -11,8 +11,19 @@ edition = "2021"
 # The `_lib` suffix may seem redundant but it is necessary
 # to make the lib name unique and wouldn't conflict with the bin name.
 # This seems to be only an issue on Windows, see https://github.com/rust-lang/cargo/issues/8519
-name = "picuredown_lib"
+name = "picturedown_lib"
 crate-type = ["staticlib", "cdylib", "rlib"]
+
+[profile.dev]
+debug = false
+incremental = true
+
+[profile.release]
+codegen-units = 1
+lto = true
+opt-level = "s"
+panic = "abort"
+strip = true
 
 [build-dependencies]
 tauri-build = { version = "2", features = [] }
@@ -34,3 +45,6 @@ tauri-plugin-dialog = "2.6.0"
 quick-xml = { version = "0.31", features = ["serialize"] }
 serde-xml-rs = "0.6"
 regex = "1.10"
+tauri-plugin-cors-fetch = "5.0.0"
+tauri-plugin-cache = "0.1"
+

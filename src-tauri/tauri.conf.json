@@ -1,8 +1,8 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
-  "productName": "picuredown",
+  "productName": "picturedown",
   "version": "0.1.0",
-  "identifier": "com.xukejian.picuredown",
+  "identifier": "com.xukejian.picturedown",
   "build": {
     "beforeDevCommand": "yarn dev",
     "devUrl": "http://localhost:1420",
@@ -12,7 +12,7 @@
   "app": {
     "windows": [
       {
-        "title": "picuredown",
+        "title": "picturedown",
         "width": 1200,
         "height": 900,
         "maximized": true,
@@ -20,7 +20,44 @@
       }
     ],
     "security": {
-      "csp": null
+      "csp": {
+        "default-src": ["'self'", "asset:"],
+        "connect-src": [
+          "'self'",
+          "https://yande.re",
+          "https://files.yande.re",
+          "https://assets.yande.re"
+        ],
+        "img-src": [
+          "'self'",
+          "asset:",
+          "https://yande.re",
+          "https://files.yande.re",
+          "https://assets.yande.re",
+          "data:"
+        ],
+        "style-src": ["'self'", "'unsafe-inline'"],
+        "script-src": ["'self'"],
+        "font-src": ["'self'"]
+      }
+    },
+    "withGlobalTauri": true
+  },
+  "plugins": {
+    "http": {
+      "allowlist": {
+        "all": true,
+        "request": true,
+        "scope": [
+          "https://yande.re/*",
+          "https://files.yande.re/*"
+        ]
+      }
+    },
+    "fs": {
+      "allowlist": {
+        "scope": ["$DOWNLOAD/*"]
+      }
     }
   },
   "bundle": {

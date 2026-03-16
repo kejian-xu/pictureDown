@@ -5,15 +5,17 @@ import { download } from "@tauri-apps/plugin-upload";
 import { save } from "@tauri-apps/plugin-dialog";
 import { downloadDir, join } from "@tauri-apps/api/path";
 import { ElMessage } from 'element-plus'
+import { appCacheDir } from '@tauri-apps/api/path';
+// import { set, get } from 'tauri-plugin-cache-api';
 
 const tags = ref("");
 const images = ref([]);
 const loading = ref(false);
 const error = ref("");
 const selectedImageIndex = ref(null);
-const currentImageBase64 = ref(null);
+const currentImageUrl = ref(null);
 const loadingImage = ref(false);
-const imageCache = ref({}); // URL -> base64 字符串的缓存
+const urlCache = ref({}); // URL -> blob URL 的缓存
 
 const currentPage = ref(1);
 const pageSize = ref(20);
@@ -44,6 +46,11 @@ onMounted(async () => {
   }else {
     downloadFilePath.value = defaultDownloadDir;
   }
+
+  const appCachePath = await appCacheDir();
+  console.log("App Cache Directory:", appCachePath);
+
+
 });
 const scrollToSection = (id) => {
   const element = document.getElementById(id)
@@ -77,21 +84,47 @@ function prevImage() {
   selectedImageIndex.value = prevIndex;
 }
 
-async function loadImageAsBase64(url) {
+async function loadImageAsBlob(url) {
   if (!url) return null;
 
-  // 检查缓存
-  if (imageCache.value[url]) {
-    return imageCache.value[url];
+  // 检查内存中的 blob URL 缓存
+  if (urlCache.value[url]) {
+    return urlCache.value[url];
   }
 
+  // // 检查插件缓存
+  // let cachedBytes = null;
+  // try {
+  //   cachedBytes = await get(url);
+  // } catch (e) {
+  //   console.warn('Cache get error:', e);
+  // }
+  // if (cachedBytes) {
+  //   // cachedBytes 是数字数组，转换为 Uint8Array
+  //   const uint8Array = new Uint8Array(cachedBytes);
+  //   const blob = new Blob([uint8Array]);
+  //   const blobUrl = URL.createObjectURL(blob);
+  //   urlCache.value[url] = blobUrl;
+  //   return blobUrl;
+  // }
+
+  // 从网络获取
   loadingImage.value = true;
   try {
-    const base64String = await invoke("fetch_image_as_base64", { url });
-    // 存储到缓存
-    imageCache.value[url] = base64String;
-    return base64String;
+    // const bytes = await invoke("fetch_image_as_bytes", { url });  
+    // const uint8Array = new Uint8Array(bytes);
+    // const blob = new Blob([uint8Array]);
+    // const blobUrl = URL.createObjectURL(blob);
+    // urlCache.value[url] = blobUrl;
+    const base64 = await invoke("fetch_image_as_base64", { url });
+    let base64Img = `data:image/jpeg;base64,${base64}`;
+    // 存储到插件缓存，设置 TTL 7天（604800秒）
+    // await set(url, bytes, { ttl: 604800 });
+    // 创建 blob URL
+    urlCache.value[url] = base64Img;
+    return  base64Img;
   } catch (err) {
+    console.error('Failed to load image:', err);
     return null;
   } finally {
     loadingImage.value = false;
@@ -99,17 +132,17 @@ async function loadImageAsBase64(url) {
 }
 
 async function loadCurrentImage() {
-  currentImageBase64.value = null;
-  const url = selectedImage.value.largeUrl;
+  currentImageUrl.value = null;
+  const url = selectedImage.value.sample_url;
   if (!url) {
     return;
   }
 
-  const base64 = await loadImageAsBase64(url);
-  if (base64) {
-    currentImageBase64.value = `data:image/jpeg;base64,${base64}`;
+  const imgUrl = await loadImageAsBlob(url);
+  if (imgUrl) {
+    currentImageUrl.value = imgUrl;
   } else {
-    currentImageBase64.value = null;
+    currentImageUrl.value = null;
   }
 }
 async function downloadFile(img) {
@@ -132,7 +165,7 @@ async function downloadFile(img) {
 // 监听 selectedImageIndex 变化，加载图片
 watch(selectedImageIndex, async (newIndex) => {
   if (newIndex === null) {
-    currentImageBase64.value = null;
+    currentImageUrl.value = null;
     loadingImage.value = false;
     return;
   }
@@ -159,9 +192,14 @@ function handleKeydown(event) {
 // 添加全局键盘事件监听
 document.addEventListener("keydown", handleKeydown);
 
-// 组件卸载时移除事件监听
+// 组件卸载时移除事件监听并清理 blob URL
 onUnmounted(() => {
   document.removeEventListener("keydown", handleKeydown);
+  // 撤销所有 blob URL 防止内存泄漏
+  Object.values(urlCache.value).forEach(url => {
+    URL.revokeObjectURL(url);
+  });
+  urlCache.value = {};
 });
 
 async function fetchPosts() {
@@ -320,14 +358,14 @@ const handleCurrentChange = (val) => {
               <span class="image-rating" :class="'rating-' + img.rating">{{
                 img.rating
               }}</span>
-              <span class="image-score">Time: {{ img.created_at }}</span>
+              <span class="image-score"><i>尺寸:</i>{{img.dimensions}};<i>时间:</i>{{ img.created_at }}</span>
              
             </div>
             <div class="image-tags">
               <el-tag @click="handleTags(tag)" type="primary" v-for="tag in img.tags.split(' ')" :key="tag">{{ tag }}</el-tag>
             </div>
             <div class="image-download">
-              <el-button type="primary" circle :loading="img.loading" icon="Download" @click="downloadFile(img)"></el-button>
+              <el-button type="primary" round :loading="img.loading" icon="Download" @click="downloadFile(img)"></el-button>
             </div>
           </div>
         </div>
@@ -369,9 +407,9 @@ const handleCurrentChange = (val) => {
               class="modal-image"
             />
           </div>
-          <div v-else-if="currentImageBase64" class="modal-image-wrapper">
+          <div v-else-if="currentImageUrl" class="modal-image-wrapper">
             <img
-              :src="currentImageBase64"
+              :src="currentImageUrl"
               :alt="selectedImage.alt"
               class="modal-image"
             />
@@ -468,7 +506,7 @@ pre {
 .image-item {
   border: 1px solid #e0e0e0;
   border-radius: 8px;
-  padding: 15px;
+  padding: 5px;
   background-color: white;
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.05);
   transition: transform 0.2s, box-shadow 0.2s;
@@ -485,7 +523,7 @@ pre {
   object-fit: contain;
   border-radius: 4px;
   display: block;
-  margin: 0 auto 10px;
+  margin: 0 auto 5px;
 }
 
 .image-info {
@@ -503,9 +541,12 @@ pre {
 }
 
 .image-rating {
-  padding: 2px 6px;
   border-radius: 4px;
   font-weight: bold;
+  width: 22px;
+  height: 22px;
+  line-height: 22px;
+  text-align: center;
   text-transform: uppercase;
 }
 
@@ -526,6 +567,12 @@ pre {
 
 .image-score {
   color: #666;
+  font-size: 12px;
+}
+.image-score i {
+  font-style: normal;
+  font-weight: bold;
+  margin-left: 5px;
 }
 
 .image-dimensions {

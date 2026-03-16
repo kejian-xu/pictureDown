@@ -66,7 +66,7 @@ async fn fetch_posts(
     if let Some(p) = page {
         query.insert("page", p.to_string());
     }
-
+    println!("query", query);
     let response = client
         .get(api_url)
         .query(&query)
@@ -85,6 +85,38 @@ async fn fetch_posts(
     Ok(posts)
 }
 
+
+#[tauri::command]
+async fn fetch_image_as_bytes(url: String) -> Result<Vec<u8>, String> {
+    // 创建一个基本的客户端配置
+    let client = reqwest::Client::builder()
+        .user_agent("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/114.0.0.0 Safari/537.36")
+        .danger_accept_invalid_certs(true) // 忽略证书错误
+        .build()
+        .map_err(|e| format!("Failed to create client: {}", e))?;
+
+ 
+
+    match client.get(&url).header("Accept", "image/*").send().await {
+        Ok(response) => {
+            if response.status().is_success() {
+                match response.bytes().await {
+                    Ok(bytes) => {
+                        println!(
+                            "Image fetched successfully, size: {} bytes",
+                            bytes.len()
+                        );
+                        Ok(bytes.to_vec())
+                    }
+                    Err(e) => Err(format!("Failed to read image bytes: {}", e)),
+                }
+            } else {
+                Err(format!("Request failed with status: {}", response.status()))
+            }
+        }
+        Err(e) => Err(format!("Failed to send request: {}", e)),
+    }
+}
 
 #[tauri::command]
 async fn fetch_image_as_base64(url: String) -> Result<String, String> {
@@ -126,7 +158,8 @@ pub fn run() {
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_upload::init())
-        .invoke_handler(tauri::generate_handler![fetch_html, fetch_posts, fetch_image_as_base64])
+        .plugin(tauri_plugin_cache::init())
+        .invoke_handler(tauri::generate_handler![fetch_html, fetch_posts, fetch_image_as_base64, fetch_image_as_bytes])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
 }
