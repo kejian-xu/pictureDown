@@ -23,7 +23,7 @@ const pageSize = ref(50);
 const total = ref(0);
 const downloadFilePath = ref("");
 
-const nsfwModel = ref("");
+const nsfwModel = ref("rating:s");
 
 const isWaterfall = ref(false);
 
@@ -242,7 +242,8 @@ async function fetchPosts() {
           dimensions: `${post.width}x${post.height}`,
           // 大图URL用于模态框显示
           largeUrl: post.file_url,
-          loading: false
+          loading: false,
+          imageLoaded: false
         }
       })
     if(isWaterfall.value) {
@@ -303,11 +304,15 @@ function handleImageError(event, index) {
     event.target.src = httpUrl;
     return;
   }
-
-  // 最后使用占位符图片
-  event.target.src =
-    "https://via.placeholder.com/200x150?text=Image+Failed+to+Load";
 }
+
+function handleImageLoad(index) {
+  const img = images.value[index];
+  if (img) {
+    img.imageLoaded = true;
+  }
+}
+
 function handleTags(tag) {
   tags.value = tag;
   fetchPosts();
@@ -323,11 +328,17 @@ const handleCurrentChange = (val) => {
   fetchPosts();
 };
 
-const waterfallLoad = throttle(() =>{
-  console.log('waterfallLoad')
+const waterfallLoad = throttle((direction) =>{
+  console.log('direction',direction)
+  if(direction === 'bottom') {
     currentPage.value += 1;
     fetchPosts();
+  }
 },10000)
+
+function handleSetting() {
+
+}
 
 </script>
 
@@ -356,6 +367,9 @@ const waterfallLoad = throttle(() =>{
             </el-button>
             <!-- <el-switch v-model="nsfwModel"></el-switch> -->
           </el-form-item>
+          <div class="float-right">
+            <el-button icon="Setting" @click="handleSetting">设置</el-button>
+          </div>
         </el-form>
       </div>
     
@@ -368,14 +382,22 @@ const waterfallLoad = throttle(() =>{
         <div class="images-grid">
           <div v-for="(img, index) in images" :key="index" class="image-item">
             <!-- {{ img.src }} -->
-            <img
-              :src="img.src"
-              :alt="img.alt"
-              class="extracted-image"
-              @error="handleImageError($event, index)"
-              @click="openImageModal(index)"
-              style="cursor: pointer"
-            />
+            <div class="image-container">
+              <div v-if="!img.imageLoaded" class="image-placeholder">
+                <!-- 占位符内容，可以是一个加载动画或灰色方块 -->
+                <div class="placeholder-content">Loading...</div>
+              </div>
+              <img
+                v-show="img.imageLoaded"
+                :src="img.src"
+                :alt="img.alt"
+                class="extracted-image"
+                @error="handleImageError($event, index)"
+                @load="handleImageLoad(index)"
+                @click="openImageModal(index)"
+                style="cursor: pointer"
+              />
+            </div>
             <div class="image-meta" >
               <span class="image-rating" :class="'rating-' + img.rating">{{
                 img.rating
@@ -395,20 +417,29 @@ const waterfallLoad = throttle(() =>{
        <el-scrollbar 
         v-else
         height="calc(100vh - 85px)"
+        always
         :distance="10"
         @end-reached="waterfallLoad"
-  >
+      >
       <div  class="images-container waterfall" >
         <div class="images-grid " >
-          <div v-for="(img, index) in images" :key="index" class="image-item">
-            <img
-              :src="img.src"
-              :alt="img.alt"
-              class="extracted-image"
-              @error="handleImageError($event, index)"
-              @click="openImageModal(index)"
-              style="cursor: pointer"
-            />
+          <div v-for="(img, index) in images" :key="index" class="image-item" :id="img.md5">
+            <div class="image-container">
+              <div v-if="!img.imageLoaded" class="image-placeholder">
+                <!-- 占位符内容，可以是一个加载动画或灰色方块 -->
+                <div class="placeholder-content">Loading...</div>
+              </div>
+              <img
+                v-show="img.imageLoaded"
+                :src="img.src"
+                :alt="img.alt"
+                class="extracted-image"
+                @error="handleImageError($event, index)"
+                @load="handleImageLoad(index)"
+                @click="openImageModal(index)"
+                style="cursor: pointer"
+              />
+            </div>
             <div class="image-download" >
               <el-button type="primary" round :loading="img.loading" icon="Download" @click="downloadFile(img)"></el-button>
             </div>
@@ -473,38 +504,8 @@ const waterfallLoad = throttle(() =>{
 </template>
 
 <style>
-:root {
-  font-family: Inter, Avenir, Helvetica, Arial, sans-serif;
-  font-size: 16px;
-  line-height: 24px;
-  font-weight: 400;
 
-  color: #0f0f0f;
-  background-color: #f6f6f6;
 
-  font-synthesis: none;
-  text-rendering: optimizeLegibility;
-  -webkit-font-smoothing: antialiased;
-  -moz-osx-font-smoothing: grayscale;
-  -webkit-text-size-adjust: 100%;
-}
-
-.container {
-  margin: 0;
-  display: flex;
-  flex-direction: column;
-  justify-content: center;
-}
-
-.row {
-  display: flex;
-  justify-content: center;
-}
-
-.section {
-  border-radius: 8px;
-  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.1);
-}
 
 .error-message {
   color: #e53935;
@@ -575,6 +576,52 @@ pre {
 
 .image-item:hover {
   box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+}
+
+.image-container {
+  position: relative;
+  width: 100%;
+  height: 200px; /* 与 .extracted-image 高度一致 */
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.image-placeholder {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  background-color: #f5f5f5;
+  border-radius: 4px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #999;
+  font-size: 14px;
+}
+
+.waterfall .image-container {
+  height: auto; /* 瀑布流中高度自适应 */
+  min-height: 100px; /* 最小高度 */
+}
+
+.waterfall .image-placeholder {
+  position: relative;
+  padding-bottom: 75%; /* 4:3 宽高比占位 */
+  height: 0;
+}
+
+.waterfall .placeholder-content {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
 }
 
 .extracted-image {
@@ -813,120 +860,8 @@ pre {
   justify-content: center;
   transition: background-color 0.2s;
 }
-
 .nav-button:hover {
   background-color: rgba(0, 0, 0, 0.9);
-}
-
-/* 合并所有暗色主题样式 */
-@media (prefers-color-scheme: dark) {
-  :root {
-    color: #f6f6f6;
-    background-color: #2f2f2f;
-  }
-
-  .section {
-    background-color: rgba(30, 30, 30, 0.5);
-  }
-
-  .image-item {
-    background-color: #2d2d2d;
-    border-color: #404040;
-  }
-
-  .image-info {
-    color: #f0f0f0;
-  }
-
-  .image-meta {
-    color: #ccc;
-  }
-
-  .image-score {
-    color: #aaa;
-  }
-
-  .image-dimensions {
-    color: #aaa;
-  }
-
-  .image-src {
-    color: #bbb;
-  }
-
-  .parsing-message {
-    background-color: #1a237e;
-    color: #90caf9;
-  }
-
-  .no-images-message {
-    background-color: #2d2d2d;
-    color: #bbb;
-  }
-
-  pre {
-    background-color: #2d2d2d;
-    color: #f8f8f2;
-  }
-
-  .error-message {
-    background-color: rgba(229, 57, 53, 0.15);
-  }
-
-  button:active {
-    background-color: #0f0f0f69;
-  }
-
-  /* 暗色主题下的模态框样式 */
-  .image-modal {
-    background-color: rgba(0, 0, 0, 0.95);
-  }
-
-  .modal-content {
-    background-color: #2d2d2d;
-    border-color: #404040;
-  }
-
-  .modal-image-container {
-    background-color: #1a1a1a;
-  }
-
-  .modal-loading,
-  .modal-error {
-    color: #aaa;
-  }
-
-  .modal-info {
-    background-color: #2d2d2d;
-    border-top-color: #404040;
-  }
-
-  .modal-tags {
-    color: #f0f0f0;
-  }
-
-  .modal-meta {
-    color: #ccc;
-  }
-
-  .modal-score,
-  .modal-dimensions {
-    color: #aaa;
-  }
-
-  .modal-current-index {
-    color: #888;
-  }
-
-  .modal-close,
-  .nav-button {
-    background-color: rgba(255, 255, 255, 0.2);
-  }
-
-  .modal-close:hover,
-  .nav-button:hover {
-    background-color: rgba(255, 255, 255, 0.3);
-  }
 }
 .download, .info {
   color: #2196f3;

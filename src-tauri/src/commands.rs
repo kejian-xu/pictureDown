@@ -47,9 +47,10 @@ async fn fetch_posts(
     page: Option<u32>,
 ) -> Result<Posts, String> {
     let client = reqwest::Client::builder()
-        .user_agent("Mozilla/5.0")
+        .user_agent("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/114.0.0.0 Safari/537.36")
+        .danger_accept_invalid_certs(true) // 忽略证书错误
         .build()
-        .map_err(|e| e.to_string())?;
+        .map_err(|e| format!("Failed to create client: {}", e))?;
 
     let api_url = "https://yande.re/post.xml";
 
