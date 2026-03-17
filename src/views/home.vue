@@ -7,6 +7,7 @@ import { downloadDir, join } from "@tauri-apps/api/path";
 import { ElMessage } from 'element-plus'
 import { appCacheDir } from '@tauri-apps/api/path';
 import { debounce,throttle  } from 'lodash-es'
+import { MasonryGrid, MasonryGridItem } from 'vue3-masonry-css';
 // import { set, get } from 'tauri-plugin-cache-api';
 
 const tags = ref("");
@@ -340,6 +341,7 @@ function handleSetting() {
 
 }
 
+
 </script>
 
 <template>
@@ -379,7 +381,7 @@ function handleSetting() {
       </div>
 
       <div  class="images-container" v-loading="loading" v-if="!isWaterfall">
-        <div class="images-grid">
+        <div class="images-grid"  ref="masonryGrid">
           <div v-for="(img, index) in images" :key="index" class="image-item">
             <!-- {{ img.src }} -->
             <div class="image-container">
@@ -422,11 +424,14 @@ function handleSetting() {
         @end-reached="waterfallLoad"
       >
       <div  class="images-container waterfall" >
-        <div class="images-grid " >
-          <div v-for="(img, index) in images" :key="index" class="image-item" :id="img.md5">
+        <MasonryGrid 
+            :columns="{ default: 8, 1024: 5, 768: 4, 480: 2}"
+            :gutter="5"
+          >
+           <MasonryGridItem v-for="(img, index) in images" :key="index">
+          <div  class="image-item" :id="img.md5">
             <div class="image-container">
               <div v-if="!img.imageLoaded" class="image-placeholder">
-                <!-- 占位符内容，可以是一个加载动画或灰色方块 -->
                 <div class="placeholder-content">Loading...</div>
               </div>
               <img
@@ -444,7 +449,8 @@ function handleSetting() {
               <el-button type="primary" round :loading="img.loading" icon="Download" @click="downloadFile(img)"></el-button>
             </div>
           </div>
-        </div>
+          </MasonryGridItem>
+          </MasonryGrid>
       </div>
       </el-scrollbar>
 
@@ -553,9 +559,7 @@ pre {
 }
 
 .waterfall .images-grid {
-  display: block;
-  column-count: 8;
-  column-gap: 5px;
+  grid-template-rows: masonry; 
 }
 
 .waterfall .image-item {

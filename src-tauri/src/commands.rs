@@ -128,8 +128,6 @@ async fn fetch_image_as_base64(url: String) -> Result<String, String> {
         .build()
         .map_err(|e| format!("Failed to create client: {}", e))?;
 
-    println!("Fetching image from URL: {}", url);
-
     match client.get(&url).header("Accept", "image/*").send().await {
         Ok(response) => {
             if response.status().is_success() {
