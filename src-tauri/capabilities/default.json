@@ -11,7 +11,10 @@
     "dialog:allow-open",
     "cache:default",
     "cache:allow-set",
-    "cache:allow-get"
+    "cache:allow-get",
+    "fs:allow-app-write-recursive",
+    "fs:allow-app-read-recursive",
+    "fs:allow-exists"
   ]
 }
 

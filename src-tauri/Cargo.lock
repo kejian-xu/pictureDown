@@ -2994,6 +2994,7 @@ dependencies = [
  "tauri-plugin-cache",
  "tauri-plugin-cors-fetch",
  "tauri-plugin-dialog",
+ "tauri-plugin-fs",
  "tauri-plugin-opener",
  "tauri-plugin-upload",
  "urlencoding",

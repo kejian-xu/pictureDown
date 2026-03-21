@@ -45,19 +45,13 @@
   },
   "plugins": {
     "http": {
-      "allowlist": {
-        "all": true,
-        "request": true,
-        "scope": [
-          "https://yande.re/*",
-          "https://files.yande.re/*"
-        ]
-      }
+      "scope": [
+        "https://yande.re/*",
+        "https://files.yande.re/*"
+      ]
     },
     "fs": {
-      "allowlist": {
-        "scope": ["$DOWNLOAD/*"]
-      }
+      "requireLiteralLeadingDot": false
     }
   },
   "bundle": {

@@ -47,4 +47,4 @@ serde-xml-rs = "0.6"
 regex = "1.10"
 tauri-plugin-cors-fetch = "5.0.0"
 tauri-plugin-cache = "0.1"
-
+tauri-plugin-fs = "2.0.0" 
