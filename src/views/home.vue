@@ -439,7 +439,11 @@ async function fetchPosts() {
   // images.value = [];
   let tagsStr = tags.value;
   if (nsfwModel.value) {
-    tagsStr = tagsStr ? `${tagsStr}+${nsfwModel.value}` : nsfwModel.value;
+    if(nsfwModel.value == '-rating:s') {
+      tagsStr = tagsStr ? `${tagsStr}+${nsfwModel.value}` : nsfwModel.value;
+    }else  {
+      tagsStr = tagsStr ? `${tagsStr}+${nsfwModel.value}` : nsfwModel.value;
+    }
   }
   try {
     const res = await invoke("fetch_posts", {
@@ -538,16 +542,6 @@ function handleImageError(event, index) {
   }
 }
 
-/**
- * 处理图片加载成功
- * @param {number} index - 图片索引
- */
-function handleImageLoad(index) {
-  const img = images.value[index];
-  if (img) {
-    img.imageLoaded = true;
-  }
-}
 
 /**
  * 处理标签选择
@@ -680,6 +674,7 @@ function selectAllImages() {
             <el-select v-model="nsfwModel" placeholder="Select rating" style="width: 120px">
               <el-option value="" label="ALL"></el-option>
               <el-option value="rating:s" label="S"></el-option>
+              <el-option value="-rating:s" label="-S"></el-option>
               <el-option value="rating:q" label="Q"></el-option>
               <el-option value="rating:e" label="E"></el-option>
             </el-select>
@@ -704,7 +699,6 @@ function selectAllImages() {
                 批量下载 ({{ selectedImages.length }})
               </el-button>
             </div>
-            <!-- <el-switch v-model="nsfwModel"></el-switch> -->
           </el-form-item>
           <div class="float-right">
              <el-button 
@@ -735,20 +729,17 @@ function selectAllImages() {
                   @change="toggleImageSelection(img)"
                 ></el-checkbox>
               </div>
-              <div v-if="!img.imageLoaded" class="image-placeholder">
-                <!-- 占位符内容，可以是一个加载动画或灰色方块 -->
-                <div class="placeholder-content">Loading...</div>
-              </div>
-              <img
-                v-show="img.imageLoaded"
-                :src="img.src"
-                :alt="img.alt"
-                class="extracted-image"
-                @error="handleImageError($event, index)"
-                @load="handleImageLoad(index)"
-                @click="openImageModal(index)"
-                style="cursor: pointer"
-              />
+               <el-image :src="img.src"  class="extracted-image"  @click="openImageModal(index)"  fit="cover" show-progress>
+                <template #viewer-error="{ activeIndex, src }">
+                  <div class="image-slot viewer-error">
+                    <el-icon><icon-picture /></el-icon>
+                    <span>
+                      this is viewer-error slot. current index: {{ activeIndex }}. src:
+                      {{ src }}
+                    </span>
+                  </div>
+                </template>
+              </el-image>
             </div>
             <div class="image-meta" >
               <span class="image-rating" :class="'rating-' + img.rating">{{
@@ -788,19 +779,18 @@ function selectAllImages() {
                   @change="toggleImageSelection(img)"
                 ></el-checkbox>
               </div>
-              <div v-if="!img.imageLoaded" class="image-placeholder">
-                <div class="placeholder-content">Loading...</div>
-              </div>
-              <img
-                v-show="img.imageLoaded"
-                :src="img.src"
-                :alt="img.alt"
-                class="extracted-image"
-                @error="handleImageError($event, index)"
-                @load="handleImageLoad(index)"
-                @click="openImageModal(index)"
-                style="cursor: pointer"
-              />
+              <el-image :src="img.src" class="extracted-image" fit="cover" show-progress  @click="openImageModal(index)">
+                <template #viewer-error="{ activeIndex, src }">
+                  <div class="image-slot viewer-error">
+                    <el-icon><icon-picture /></el-icon>
+                    <span>
+                      this is viewer-error slot. current index: {{ activeIndex }}. src:
+                      {{ src }}
+                    </span>
+                  </div>
+                </template>
+              </el-image>
+            
             </div>
             <div class="image-download" >
               <el-button :loading="img.loading" type="primary" round icon="Download" @click="downloadFile(img)"></el-button>
@@ -1016,7 +1006,6 @@ pre {
 
 .waterfall .image-item {
   break-inside: avoid;
-  margin-bottom: 5px;
 }
 
 
@@ -1083,7 +1072,6 @@ pre {
 .extracted-image {
   max-width: 100%;
   height: 200px;
-  object-fit: contain;
   border-radius: 4px;
   display: block;
   margin: 0 auto 5px;
@@ -1091,6 +1079,7 @@ pre {
 .waterfall .extracted-image {
   width: 100%;
   height: auto;
+  margin: 0;
 }
 
 .image-info {

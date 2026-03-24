@@ -54,25 +54,28 @@ async fn fetch_posts(
         .build()
         .map_err(|e| format!("Failed to create client: {}", e))?;
 
-    let api_url = "https://yande.re/post.xml";
-
-    let mut query: HashMap<&str, String> = HashMap::new();
-
-    if let Some(t) = tags {
-        query.insert("tags", t);
-    }
-
-    if let Some(l) = limit {
-        query.insert("limit", l.to_string());
-    }
+    let mut api_url = String::from("https://yande.re/post.xml");
+    let mut query_parts: Vec<String> = Vec::new();
 
     if let Some(p) = page {
-        query.insert("page", p.to_string());
+        query_parts.push(format!("page={}", p));
     }
-    // println!("query", query);
+    if let Some(l) = limit {
+        query_parts.push(format!("limit={}", l));
+    }
+    if let Some(t) = tags {
+        // 如果 tags 可能含有特殊字符，请使用 percent_encode。
+        query_parts.push(format!("tags={}", t));
+    }
+
+    if !query_parts.is_empty() {
+        api_url.push('?');
+        api_url.push_str(&query_parts.join("&"));
+    }
+
+    println!("api_url: {}", api_url);
     let response = client
-        .get(api_url)
-        .query(&query)
+        .get(&api_url)
         .send()
         .await
         .map_err(|e| e.to_string())?;
@@ -105,10 +108,6 @@ async fn fetch_image_as_bytes(url: String) -> Result<Vec<u8>, String> {
             if response.status().is_success() {
                 match response.bytes().await {
                     Ok(bytes) => {
-                        println!(
-                            "Image fetched successfully, size: {} bytes",
-                            bytes.len()
-                        );
                         Ok(bytes.to_vec())
                     }
                     Err(e) => Err(format!("Failed to read image bytes: {}", e)),
@@ -136,11 +135,6 @@ async fn fetch_image_as_base64(url: String) -> Result<String, String> {
                 match response.bytes().await {
                     Ok(bytes) => {
                         let base64_string = base64::encode(&bytes);
-                        println!(
-                            "Image fetched successfully, size: {} bytes, base64 length: {}",
-                            bytes.len(),
-                            base64_string.len()
-                        );
                         Ok(base64_string)
                     }
                     Err(e) => Err(format!("Failed to read image bytes: {}", e)),
