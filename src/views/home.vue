@@ -11,6 +11,7 @@ import { debounce, throttle } from 'lodash-es'
 import { MasonryGrid, MasonryGridItem } from 'vue3-masonry-css';
 import { Check, Close, Clock } from '@element-plus/icons-vue'
 import * as tauriCacheApi from 'tauri-plugin-cache-api';
+import ImagePreviewModal from '../components/ImagePreviewModal.vue';
 
 // ============ 响应式数据 ============
 
@@ -28,15 +29,6 @@ const error = ref("");
 
 /** 当前选中的图片索引 */
 const selectedImageIndex = ref(null);
-
-/** 当前显示的图片URL */
-const currentImageUrl = ref(null);
-
-/** 图片加载状态 */
-const loadingImage = ref(false);
-
-/** URL缓存，用于存储图片blob URL */
-const urlCache = ref({});
 
 /** 当前页码 */
 const currentPage = ref(1);
@@ -77,17 +69,6 @@ const showDownloadList = ref(false);
 /** 下载列表，包含每个图片的下载状态 */
 const downloadList = ref([]);
 
-/** 当前选中的图片对象 */
-const selectedImage = computed(() => {
-  if (
-    selectedImageIndex.value === null ||
-    !images.value[selectedImageIndex.value]
-  ) {
-    return null;
-  }
-  return images.value[selectedImageIndex.value];
-});
-
 /** 模态框显示状态 */
 const showModal = computed(() => selectedImageIndex.value !== null);
 
@@ -125,18 +106,6 @@ onMounted(async () => {
   // console.log("App Cache Directory:", appCachePath);
 });
 
-/**
- * 监听selectedImageIndex变化，加载对应图片
- */
-watch(selectedImageIndex, async (newIndex) => {
-  if (newIndex === null) {
-    currentImageUrl.value = null;
-    loadingImage.value = false;
-    return;
-  }
-  await loadCurrentImage();
-});
-
 // ============ 工具函数 ============
 
 /**
@@ -154,87 +123,9 @@ const scrollToSection = (id) => {
   }
 }
 
-/**
- * 打开图片模态框
- * @param {number} index - 图片索引
- */
-function openImageModal(index) {
-  selectedImageIndex.value = index;
-}
-
-/**
- * 关闭图片模态框
- */
-function closeModal() {
-  selectedImageIndex.value = null;
-}
-
-/**
- * 显示下一张图片
- */
-function nextImage() {
-  if (selectedImageIndex.value === null) return;
-  const nextIndex = (selectedImageIndex.value + 1) % images.value.length;
-  selectedImageIndex.value = nextIndex;
-}
-
-/**
- * 显示上一张图片
- */
-function prevImage() {
-  if (selectedImageIndex.value === null) return;
-  const prevIndex =
-    (selectedImageIndex.value - 1 + images.value.length) % images.value.length;
-  selectedImageIndex.value = prevIndex;
-}
-
-/**
- * 加载图片并返回blob URL
- * 支持内存缓存，避免重复加载
- * @param {string} url - 图片URL
- * @returns {Promise<string|null>} blob URL或null
- */
-async function loadImage(url) {
-  if (!url) return null;
-
-  // 检查内存中的 blob URL 缓存
-  if (urlCache.value[url]) {
-    return urlCache.value[url];
-  }
 
 
-  // 从网络获取
-  loadingImage.value = true;
-  try {
-    const base64 = await invoke("fetch_image_as_base64", { url });
-    let base64Img = `data:image/jpeg;base64,${base64}`;
-    urlCache.value[url] = base64Img;
-    return  base64Img;
-  } catch (err) {
-    console.error('Failed to load image:', err);
-    return null;
-  } finally {
-    loadingImage.value = false;
-  }
-}
 
-/**
- * 加载当前选中的图片
- */
-async function loadCurrentImage() {
-  currentImageUrl.value = null;
-  const url = selectedImage.value.sample_url;
-  if (!url) {
-    return;
-  }
-
-  const imgUrl = await loadImage(url);
-  if (imgUrl) {
-    currentImageUrl.value = imgUrl;
-  } else {
-    currentImageUrl.value = null;
-  }
-}
 /**
  * 下载单个图片文件
  * 支持文件存在性检查和进度跟踪
@@ -370,55 +261,12 @@ async function batchDownload() {
   selectedImages.value = [];
 }
 
-// 监听 selectedImageIndex 变化，加载图片
-watch(selectedImageIndex, async (newIndex) => {
-  if (newIndex === null) {
-    currentImageUrl.value = null;
-    loadingImage.value = false;
-    return;
-  }
-  await loadCurrentImage();
-});
 
-// ============ 键盘事件处理 ============
-
-/**
- * 处理键盘事件
- * 支持模态框中的导航和关闭操作
- * @param {KeyboardEvent} event - 键盘事件
- */
-function handleKeydown(event) {
-  if (!showModal.value) return;
-
-  switch (event.key) {
-    case "Escape":
-      closeModal();
-      break;
-    case "ArrowRight":
-      nextImage();
-      break;
-    case "ArrowLeft":
-      prevImage();
-      break;
-  }
-}
-
-// ============ 事件监听器设置 ============
-
-// 添加全局键盘事件监听
-document.addEventListener("keydown", handleKeydown);
 
 /**
  * 组件卸载时的清理工作
- * 移除事件监听器并清理blob URL防止内存泄漏
  */
 onUnmounted(() => {
-  document.removeEventListener("keydown", handleKeydown);
-  // 撤销所有 blob URL 防止内存泄漏
-  Object.values(urlCache.value).forEach(url => {
-    URL.revokeObjectURL(url);
-  });
-  urlCache.value = {};
 });
 
 /**
@@ -668,7 +516,7 @@ function selectAllImages() {
       <div class="search-container">
         <el-form inline label-width="auto">
           <el-form-item label="Tags">
-            <el-input v-model="tags" placeholder="Enter tags (e.g., cute cat)" />
+            <el-input v-model="tags" placeholder="Enter tags (e.g., cute cat)" @keydown="handleSearch" />
           </el-form-item>
           <el-form-item label="分级">
             <el-select v-model="nsfwModel" placeholder="Select rating" style="width: 120px">
@@ -729,7 +577,7 @@ function selectAllImages() {
                   @change="toggleImageSelection(img)"
                 ></el-checkbox>
               </div>
-               <el-image :src="img.src"  class="extracted-image"  @click="openImageModal(index)"  fit="cover" show-progress>
+               <el-image :src="img.src"  class="extracted-image"  @click="selectedImageIndex = index"  fit="cover" show-progress>
                 <template #viewer-error="{ activeIndex, src }">
                   <div class="image-slot viewer-error">
                     <el-icon><icon-picture /></el-icon>
@@ -764,7 +612,7 @@ function selectAllImages() {
         :distance="10"
         @end-reached="waterfallLoad"
       >
-      <div  class="images-container waterfall" >
+      <div class="images-container waterfall" >
         <MasonryGrid 
             :columns="{ default: 8, 1024: 5, 768: 4, 480: 2}"
             :gutter="5"
@@ -779,7 +627,7 @@ function selectAllImages() {
                   @change="toggleImageSelection(img)"
                 ></el-checkbox>
               </div>
-              <el-image :src="img.src" class="extracted-image" fit="cover" show-progress  @click="openImageModal(index)">
+              <el-image :src="img.src" class="extracted-image" fit="cover" show-progress  @click="selectedImageIndex = index">
                 <template #viewer-error="{ activeIndex, src }">
                   <div class="image-slot viewer-error">
                     <el-icon><icon-picture /></el-icon>
@@ -822,37 +670,12 @@ function selectAllImages() {
      
     </div>
 
-    <!-- 图片模态框 -->
-    <div v-if="showModal" class="image-modal" @click.self="closeModal">
-      <div class="modal-content">
-        <span class="modal-close" @click="closeModal">×</span>
-        <div class="modal-image-container">
-          <div
-            v-if="loadingImage"
-            class="modal-loading"
-            v-loading="loadingImage"
-          >
-            <img
-              :src="images[selectedImageIndex].src"
-              :alt="selectedImage.alt"
-              class="modal-image"
-            />
-          </div>
-          <div v-else-if="currentImageUrl" class="modal-image-wrapper">
-            <img
-              :src="currentImageUrl"
-              :alt="selectedImage.alt"
-              class="modal-image"
-            />
-          </div>
-          <div v-else class="modal-error">Failed to load image.</div>
-        </div>
-        <div class="modal-navigation">
-          <span class="nav-button prev-button" @click="prevImage">‹</span>
-          <span class="nav-button next-button" @click="nextImage">›</span>
-        </div>
-      </div>
-    </div>
+    <!-- 图片预览模态框组件 -->
+    <ImagePreviewModal
+      v-model:visible="showModal"
+      v-model:selectedIndex="selectedImageIndex"
+      :images="images"
+    />
 
     <!-- 设置对话框 -->
     <el-dialog v-model="showSettings" title="设置" width="500px">
@@ -886,7 +709,7 @@ function selectAllImages() {
         <div class="download-items" v-if="downloadList.length > 0">
           <div 
             v-for="(item, index) in downloadList" 
-            :key="item.md5" 
+            :key="index"
             class="download-item"
             :class="`status-${item.status}`"
           >
