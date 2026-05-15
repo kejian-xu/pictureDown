@@ -1,5 +1,4 @@
 use crate::Posts;
-use std::collections::HashMap;
 use tauri::Manager;
 use tauri_plugin_fs::FsExt;
 
@@ -50,7 +49,7 @@ async fn fetch_posts(
 ) -> Result<Posts, String> {
     let client = reqwest::Client::builder()
         .user_agent("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/114.0.0.0 Safari/537.36")
-        .danger_accept_invalid_certs(true) // 忽略证书错误
+        .danger_accept_invalid_certs(true)
         .build()
         .map_err(|e| format!("Failed to create client: {}", e))?;
 
@@ -64,7 +63,6 @@ async fn fetch_posts(
         query_parts.push(format!("limit={}", l));
     }
     if let Some(t) = tags {
-        // 如果 tags 可能含有特殊字符，请使用 percent_encode。
         query_parts.push(format!("tags={}", t));
     }
 
@@ -74,11 +72,7 @@ async fn fetch_posts(
     }
 
     println!("api_url: {}", api_url);
-    let response = client
-        .get(&api_url)
-        .send()
-        .await
-        .map_err(|e| e.to_string())?;
+    let response = client.get(&api_url).send().await.map_err(|e| e.to_string())?;
 
     if !response.status().is_success() {
         return Err(format!("Request failed: {}", response.status()));
@@ -118,6 +112,47 @@ async fn fetch_image_as_bytes(url: String) -> Result<Vec<u8>, String> {
         }
         Err(e) => Err(format!("Failed to send request: {}", e)),
     }
+}
+
+#[tauri::command]
+async fn fetch_image_to_local(url: String, cache_dir: String, filename: String) -> Result<String, String> {
+    let file_path = std::path::Path::new(&cache_dir).join(&filename);
+
+    // 如果本地已缓存，直接返回路径
+    if file_path.exists() {
+        return Ok(file_path.to_string_lossy().to_string());
+    }
+
+    // 确保缓存目录存在
+    std::fs::create_dir_all(&cache_dir)
+        .map_err(|e| format!("Failed to create cache dir: {}", e))?;
+
+    let client = reqwest::Client::builder()
+        .user_agent("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/114.0.0.0 Safari/537.36")
+        .danger_accept_invalid_certs(true)
+        .build()
+        .map_err(|e| format!("Failed to create client: {}", e))?;
+
+    let response = client
+        .get(&url)
+        .header("Accept", "image/*")
+        .send()
+        .await
+        .map_err(|e| format!("Failed to send request: {}", e))?;
+
+    if !response.status().is_success() {
+        return Err(format!("Request failed with status: {}", response.status()));
+    }
+
+    let bytes = response
+        .bytes()
+        .await
+        .map_err(|e| format!("Failed to read image bytes: {}", e))?;
+
+    std::fs::write(&file_path, &bytes)
+        .map_err(|e| format!("Failed to write file: {}", e))?;
+
+    Ok(file_path.to_string_lossy().to_string())
 }
 
 #[tauri::command]
@@ -164,12 +199,12 @@ async fn grant_path_access(app_handle: tauri::AppHandle, path: String) -> Result
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
-        .plugin(tauri_plugin_fs::init())  // 注册 fs 插件
+        .plugin(tauri_plugin_fs::init())
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_upload::init())
         .plugin(tauri_plugin_cache::init())
-        .invoke_handler(tauri::generate_handler![fetch_html, fetch_posts, fetch_image_as_base64, fetch_image_as_bytes,grant_path_access])
+        .invoke_handler(tauri::generate_handler![fetch_html, fetch_posts, fetch_image_as_base64, fetch_image_as_bytes, fetch_image_to_local, grant_path_access])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
 }

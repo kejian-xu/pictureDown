@@ -1,6 +1,6 @@
 <script setup>
 import { ref, computed, watch, onMounted, onUnmounted } from "vue";
-import { invoke } from "@tauri-apps/api/core";
+import { invoke, convertFileSrc } from "@tauri-apps/api/core";
 
 const props = defineProps({
   visible: {
@@ -15,6 +15,10 @@ const props = defineProps({
   selectedIndex: {
     type: Number,
     default: null
+  },
+  cacheDir: {
+    type: String,
+    default: ""
   }
 });
 
@@ -25,7 +29,6 @@ const emit = defineEmits([
 
 const currentImageUrl = ref(null);
 const loadingImage = ref(false);
-const urlCache = ref({});
 
 const selectedImage = computed(() => {
   if (props.selectedIndex === null || !props.images[props.selectedIndex]) {
@@ -36,16 +39,14 @@ const selectedImage = computed(() => {
 
 const showModal = computed(() => props.visible);
 
-async function loadImage(url) {
-  if (urlCache.value[url]) {
-    return urlCache.value[url];
-  }
-
+async function loadImage(url, filename) {
   try {
-    const base64 = await invoke("fetch_image_as_base64", { url });
-    let base64Img = `data:image/jpeg;base64,${base64}`;
-    urlCache.value[url] = base64Img;
-    return base64Img;
+    const localPath = await invoke("fetch_image_to_local", {
+      url,
+      cacheDir: props.cacheDir,
+      filename
+    });
+    return convertFileSrc(localPath);
   } catch (error) {
     console.error("Failed to load image:", error);
   }
@@ -54,13 +55,14 @@ async function loadImage(url) {
 
 async function loadCurrentImage() {
   currentImageUrl.value = null;
-  const url = selectedImage.value?.sample_url;
-  if (!url) {
+  const img = selectedImage.value;
+  if (!img?.file_url) {
     return;
   }
 
   loadingImage.value = true;
-  const imgUrl = await loadImage(url);
+  const filename = `${img.md5}.${img.file_ext}`;
+  const imgUrl = await loadImage(img.file_url, filename);
   if (imgUrl) {
     currentImageUrl.value = imgUrl;
   } else {
@@ -117,8 +119,6 @@ onMounted(() => {
 
 onUnmounted(() => {
   document.removeEventListener("keydown", handleKeydown);
-  // 清理缓存
-  urlCache.value = {};
 });
 </script>
 

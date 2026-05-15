@@ -28,17 +28,14 @@
           "https://files.yande.re",
           "https://assets.yande.re"
         ],
-        "img-src": [
-          "'self'",
-          "asset:",
-          "https://yande.re",
-          "https://files.yande.re",
-          "https://assets.yande.re",
-          "data:"
-        ],
+        "img-src": ["'self'", "asset:", "http://asset.localhost"],
         "style-src": ["'self'", "'unsafe-inline'"],
         "script-src": ["'self'"],
         "font-src": ["'self'"]
+      },
+      "assetProtocol": {
+        "enable": true,
+        "scope": ["**"]
       }
     },
     "withGlobalTauri": true

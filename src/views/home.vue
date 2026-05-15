@@ -34,7 +34,7 @@ const selectedImageIndex = ref(null);
 const currentPage = ref(1);
 
 /** 每页显示数量 */
-const pageSize = ref(20);
+const pageSize = ref(100);
 
 /** 总图片数量 */
 const total = ref(0);
@@ -69,6 +69,9 @@ const showDownloadList = ref(false);
 /** 下载列表，包含每个图片的下载状态 */
 const downloadList = ref([]);
 
+/** 是否显示选择复选框 */
+const showCheckboxes = ref(false);
+
 /** 模态框显示状态 */
 const showModal = computed(() => selectedImageIndex.value !== null);
 
@@ -83,7 +86,6 @@ const showModal = computed(() => selectedImageIndex.value !== null);
  * 加载下载目录设置并获取第一页图片
  */
 onMounted(async () => {
-  fetchPosts();
   try {
     let defaultDownloadDir = await tauriCacheApi.get('downloadFilePath');
     console.log(defaultDownloadDir,'defaultDownloadDir')
@@ -101,6 +103,7 @@ onMounted(async () => {
     downloadFilePath.value = defaultDownloadDir;
     await tauriCacheApi.set("downloadFilePath", defaultDownloadDir);
   }
+  fetchPosts();
 
   // const appCachePath = await appCacheDir();
   // console.log("App Cache Directory:", appCachePath);
@@ -469,8 +472,7 @@ async function selectDownloadPath() {
 /**
  * 保存设置
  */
-function saveSettings() {
-  // 设置在选择目录时已经保存，这里只是关闭对话框
+async function saveSettings() {
   showSettings.value = false;
 }
 
@@ -481,6 +483,20 @@ function closeDownloadList() {
   showDownloadList.value = false;
   // 重置下载列表
   downloadList.value = [];
+  showCheckboxes.value = false
+}
+
+/**
+ * 图片点击处理：选择模式下切换选择，否则预览
+ * @param {Object} img - 图片对象
+ * @param {number} index - 图片索引
+ */
+function handleImageClick(img, index) {
+  if (showCheckboxes.value) {
+    toggleImageSelection(img);
+  } else {
+    selectedImageIndex.value = index;
+  }
 }
 
 /**
@@ -493,6 +509,16 @@ function toggleImageSelection(img) {
     selectedImages.value.splice(index, 1);
   } else {
     selectedImages.value.push(img);
+  }
+}
+
+/**
+ * 切换选择模式
+ */
+function toggleSelectionMode() {
+  showCheckboxes.value = !showCheckboxes.value;
+  if (!showCheckboxes.value) {
+    selectedImages.value = [];
   }
 }
 
@@ -534,19 +560,24 @@ function selectAllImages() {
             <el-button @click="isWaterfall = !isWaterfall" type="info">
               {{ isWaterfall ? "网格视图" : "瀑布流" }}
             </el-button>
-            <el-button @click="selectAllImages" type="warning">
-              {{ selectedImages.length === images.length ? "取消全选" : "全选" }}
+            <el-button @click="toggleSelectionMode" :type="showCheckboxes ? 'danger' : 'warning'">
+              {{ showCheckboxes ? "取消选择" : "批量选择" }}
             </el-button>
-            <div style="display: inline-block; margin-left: 10px;">
-              <el-button 
-                v-if="!isBatchDownloading" 
-                @click="batchDownload" 
-                type="success" 
-                :disabled="selectedImages.length === 0"
-              >
-                批量下载 ({{ selectedImages.length }})
+            <template v-if="showCheckboxes">
+              <el-button @click="selectAllImages" type="warning">
+                {{ selectedImages.length === images.length ? "取消全选" : "全选" }}
               </el-button>
-            </div>
+              <div style="display: inline-block; margin-left: 10px;">
+                <el-button
+                  v-if="!isBatchDownloading"
+                  @click="batchDownload"
+                  type="success"
+                  :disabled="selectedImages.length === 0"
+                >
+                  批量下载 ({{ selectedImages.length }})
+                </el-button>
+              </div>
+            </template>
           </el-form-item>
           <div class="float-right">
              <el-button 
@@ -570,14 +601,14 @@ function selectAllImages() {
           <div v-for="(img, index) in images" :key="index" class="image-item">
             <!-- {{ img.src }} -->
             <div class="image-container">
-              <div class="image-checkbox">
+              <div v-if="showCheckboxes" class="image-checkbox">
                 <el-checkbox
                   size="large"
-                  :model-value="selectedImages.some(selected => selected.md5 === img.md5)" 
+                  :model-value="selectedImages.some(selected => selected.md5 === img.md5)"
                   @change="toggleImageSelection(img)"
                 ></el-checkbox>
               </div>
-               <el-image :src="img.src" lazy class="extracted-image"  @click="selectedImageIndex = index"  fit="cover" show-progress>
+               <el-image :src="img.src" lazy class="extracted-image"  @click="handleImageClick(img, index)"  fit="cover" show-progress>
                 <template #viewer-error="{ activeIndex, src }">
                   <div class="image-slot viewer-error">
                     <el-icon><icon-picture /></el-icon>
@@ -620,14 +651,14 @@ function selectAllImages() {
            <MasonryGridItem v-for="(img, index) in images" :key="index">
           <div  class="image-item" :id="img.md5">
             <div class="image-container">
-              <div class="image-checkbox">
-                <el-checkbox 
+              <div v-if="showCheckboxes" class="image-checkbox">
+                <el-checkbox
                   size="large"
-                  :model-value="selectedImages.some(selected => selected.md5 === img.md5)" 
+                  :model-value="selectedImages.some(selected => selected.md5 === img.md5)"
                   @change="toggleImageSelection(img)"
                 ></el-checkbox>
               </div>
-              <el-image lazy :src="img.src" class="extracted-image" fit="cover" show-progress  @click="selectedImageIndex = index">
+              <el-image lazy :src="img.src" class="extracted-image" fit="cover" show-progress  @click="handleImageClick(img, index)">
                 <template #viewer-error="{ activeIndex, src }">
                   <div class="image-slot viewer-error">
                     <el-icon><icon-picture /></el-icon>
@@ -675,15 +706,16 @@ function selectAllImages() {
       v-model:visible="showModal"
       v-model:selectedIndex="selectedImageIndex"
       :images="images"
+      :cacheDir="downloadFilePath"
     />
 
     <!-- 设置对话框 -->
     <el-dialog v-model="showSettings" title="设置" width="500px">
       <el-form label-width="120px" class="settings-form">
         <el-form-item label="下载目录">
-          <el-input 
-            v-model="downloadFilePath" 
-            readonly 
+          <el-input
+            v-model="downloadFilePath"
+            readonly
             placeholder="选择下载目录"
             style="width: 70%;"
           />
@@ -776,7 +808,9 @@ function selectAllImages() {
 
 <style>
 
-
+.image-checkbox .el-checkbox.el-checkbox--large {
+  height: auto;
+}
 
 .error-message {
   color: #e53935;
@@ -1154,7 +1188,7 @@ pre {
   opacity: 0;
   transition: all .3s;
 }
-.image-item:hover .image-download{
+.image-item:hover .image-download {
   opacity: 1;
 }
 
