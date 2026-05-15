@@ -34,7 +34,7 @@ const selectedImageIndex = ref(null);
 const currentPage = ref(1);
 
 /** 每页显示数量 */
-const pageSize = ref(50);
+const pageSize = ref(20);
 
 /** 总图片数量 */
 const total = ref(0);
@@ -516,7 +516,7 @@ function selectAllImages() {
       <div class="search-container">
         <el-form inline label-width="auto">
           <el-form-item label="Tags">
-            <el-input v-model="tags" placeholder="Enter tags (e.g., cute cat)" @keydown="handleSearch" />
+            <el-input v-model="tags" placeholder="Enter tags (e.g., cute cat)" />
           </el-form-item>
           <el-form-item label="分级">
             <el-select v-model="nsfwModel" placeholder="Select rating" style="width: 120px">
@@ -577,7 +577,7 @@ function selectAllImages() {
                   @change="toggleImageSelection(img)"
                 ></el-checkbox>
               </div>
-               <el-image :src="img.src"  class="extracted-image"  @click="selectedImageIndex = index"  fit="cover" show-progress>
+               <el-image :src="img.src" lazy class="extracted-image"  @click="selectedImageIndex = index"  fit="cover" show-progress>
                 <template #viewer-error="{ activeIndex, src }">
                   <div class="image-slot viewer-error">
                     <el-icon><icon-picture /></el-icon>
@@ -627,7 +627,7 @@ function selectAllImages() {
                   @change="toggleImageSelection(img)"
                 ></el-checkbox>
               </div>
-              <el-image :src="img.src" class="extracted-image" fit="cover" show-progress  @click="selectedImageIndex = index">
+              <el-image lazy :src="img.src" class="extracted-image" fit="cover" show-progress  @click="selectedImageIndex = index">
                 <template #viewer-error="{ activeIndex, src }">
                   <div class="image-slot viewer-error">
                     <el-icon><icon-picture /></el-icon>
