@@ -26,9 +26,27 @@
           "'self'",
           "https://yande.re",
           "https://files.yande.re",
-          "https://assets.yande.re"
+          "https://assets.yande.re",
+          "https://konachan.com",
+          "https://konachan.net",
+          "https://danbooru.donmai.us",
+          "https://gelbooru.com"
         ],
-        "img-src": ["'self'", "asset:", "http://asset.localhost"],
+        "img-src": [
+          "'self'",
+          "asset:",
+          "http://asset.localhost",
+          "https://yande.re",
+          "https://files.yande.re",
+          "https://assets.yande.re",
+          "https://konachan.com",
+          "https://konachan.net",
+          "https://danbooru.donmai.us",
+          "https://cdn.donmai.us",
+          "https://gelbooru.com",
+          "https://img3.gelbooru.com",
+          "https://video-cdn3.gelbooru.com"
+        ],
         "style-src": ["'self'", "'unsafe-inline'"],
         "script-src": ["'self'"],
         "font-src": ["'self'"]
@@ -44,7 +62,12 @@
     "http": {
       "scope": [
         "https://yande.re/*",
-        "https://files.yande.re/*"
+        "https://files.yande.re/*",
+        "https://konachan.net/*",
+        "https://danbooru.donmai.us/*",
+        "https://cdn.donmai.us/*",
+        "https://gelbooru.com/*",
+        "https://img3.gelbooru.com/*"
       ]
     },
     "fs": {

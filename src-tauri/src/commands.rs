@@ -1,5 +1,4 @@
 use crate::Posts;
-use tauri::Manager;
 use tauri_plugin_fs::FsExt;
 
 
@@ -46,43 +45,192 @@ async fn fetch_posts(
     tags: Option<String>,
     limit: Option<u32>,
     page: Option<u32>,
+    source: Option<String>,
+    login: Option<String>,
+    api_key: Option<String>,
 ) -> Result<Posts, String> {
+    let base_url = source.unwrap_or_else(|| "yande.re".to_string());
+
     let client = reqwest::Client::builder()
-        .user_agent("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/114.0.0.0 Safari/537.36")
         .danger_accept_invalid_certs(true)
+        .cookie_store(true)
+        .timeout(std::time::Duration::from_secs(30))
         .build()
         .map_err(|e| format!("Failed to create client: {}", e))?;
 
-    let mut api_url = String::from("https://yande.re/post.xml");
-    let mut query_parts: Vec<String> = Vec::new();
-
-    if let Some(p) = page {
-        query_parts.push(format!("page={}", p));
-    }
-    if let Some(l) = limit {
-        query_parts.push(format!("limit={}", l));
-    }
-    if let Some(t) = tags {
-        query_parts.push(format!("tags={}", t));
-    }
-
-    if !query_parts.is_empty() {
-        api_url.push('?');
-        api_url.push_str(&query_parts.join("&"));
-    }
-
+    let api_url = build_api_url(&base_url, &tags, limit, page, &login, &api_key);
     println!("api_url: {}", api_url);
-    let response = client.get(&api_url).send().await.map_err(|e| e.to_string())?;
+
+    if base_url.contains("donmai") || base_url.contains("gelbooru") {
+        fetch_json_posts(&client, &api_url, &base_url, &tags).await
+    } else {
+        fetch_xml_posts(&client, &api_url, &base_url).await
+    }
+}
+
+// ---- 子函数 ----
+
+/// 构建 API URL（Moebooru / Danbooru / Gelbooru）
+fn build_api_url(
+    base_url: &str,
+    tags: &Option<String>,
+    limit: Option<u32>,
+    page: Option<u32>,
+    login: &Option<String>,
+    api_key: &Option<String>,
+) -> String {
+    if base_url.contains("gelbooru") {
+        let pid = page.unwrap_or(1).saturating_sub(1);
+        let mut url = format!(
+            "https://{}/index.php?page=dapi&s=post&q=index&json=1&pid={}&limit={}&tags={}",
+            base_url, pid, limit.unwrap_or(100), tags.as_deref().unwrap_or("")
+        );
+        if let (Some(ref uid), Some(ref key)) = (login, api_key) {
+            url.push_str(&format!("&user_id={}&api_key={}", uid, key));
+        }
+        url
+    } else {
+        let is_danbooru = base_url.contains("donmai");
+        let endpoint = if is_danbooru { "posts.json" } else { "post.xml" };
+        let mut url = format!("https://{}/{}", base_url, endpoint);
+        let mut params: Vec<String> = Vec::new();
+        if let Some(p) = page { params.push(format!("page={}", p)); }
+        if let Some(l) = limit { params.push(format!("limit={}", l)); }
+        if let Some(ref t) = tags { params.push(format!("tags={}", t)); }
+        if is_danbooru {
+            if let Some(ref l) = login { params.push(format!("login={}", l)); }
+            if let Some(ref k) = api_key { params.push(format!("api_key={}", k)); }
+        }
+        if !params.is_empty() {
+            url.push('?');
+            url.push_str(&params.join("&"));
+        }
+        url
+    }
+}
+
+/// 请求 JSON API（Danbooru / Gelbooru）并解析
+async fn fetch_json_posts(
+    client: &reqwest::Client,
+    api_url: &str,
+    base_url: &str,
+    tags: &Option<String>,
+) -> Result<Posts, String> {
+    let is_danbooru = base_url.contains("donmai");
+    let ua = if is_danbooru {
+        "PictureDown/1.0 (xukejian11)"
+    } else {
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"
+    };
+
+    let response = client.get(api_url)
+        .header("User-Agent", ua)
+        .header("Accept", "application/json")
+        .header("Referer", &format!("https://{}/", base_url))
+        .send().await.map_err(|e| e.to_string())?;
+
+    if !response.status().is_success() {
+        return Err(format!("Request failed: {}", response.status()));
+    }
+
+    let json: serde_json::Value = response.json().await
+        .map_err(|e| format!("JSON parse error: {}", e))?;
+
+    let raw_posts: Vec<serde_json::Value> = if let Some(arr) = json.as_array() {
+        arr.clone()
+    } else if let Some(arr) = json["post"].as_array() {
+        arr.clone()
+    } else {
+        return Err("Unexpected JSON format".to_string());
+    };
+
+    let posts: Vec<serde_json::Value> = raw_posts.into_iter().map(|mut p| {
+        if let Some(obj) = p.as_object_mut() {
+            normalize_fields(obj, is_danbooru);
+        }
+        p
+    }).collect();
+
+    let count = if is_danbooru {
+        fetch_danbooru_count(client, base_url, tags).await
+    } else {
+        json["@attributes"]["count"].as_i64().unwrap_or(posts.len() as i64) as i32
+    };
+
+    Ok(Posts { count, offset: 0, posts })
+}
+
+/// 规范化 JSON 字段名 → Moebooru 兼容格式
+fn normalize_fields(obj: &mut serde_json::Map<String, serde_json::Value>, is_danbooru: bool) {
+    if is_danbooru {
+        rename_field(obj, "preview_file_url", "preview_url");
+        rename_field(obj, "large_file_url", "sample_url");
+        rename_field(obj, "tag_string", "tags");
+        rename_field(obj, "image_width", "width");
+        rename_field(obj, "image_height", "height");
+    }
+    if let Some(serde_json::Value::String(ts)) = obj.get("created_at").cloned() {
+        let timestamp = chrono::DateTime::parse_from_rfc3339(&ts)
+            .map(|dt| dt.timestamp())
+            .or_else(|_| {
+                chrono::NaiveDateTime::parse_from_str(&ts, "%a %b %d %H:%M:%S %z %Y")
+                    .map(|dt| dt.and_utc().timestamp())
+            })
+            .unwrap_or(0);
+        obj.insert("created_at".to_string(), serde_json::Value::Number(timestamp.into()));
+    }
+}
+
+/// 获取 Danbooru 精确总数
+async fn fetch_danbooru_count(
+    client: &reqwest::Client,
+    base_url: &str,
+    tags: &Option<String>,
+) -> i32 {
+    let mut url = format!("https://{}/counts/posts.json", base_url);
+    if let Some(ref t) = tags {
+        url.push_str(&format!("?tags={}", t));
+    }
+    let result = client.get(&url)
+        .header("User-Agent", "PictureDown/1.0 (xukejian11)")
+        .header("Accept", "application/json")
+        .send()
+        .await;
+    match result {
+        Ok(resp) if resp.status().is_success() => {
+            let json: serde_json::Value = resp.json().await.unwrap_or_default();
+            json["counts"]["posts"].as_i64().unwrap_or(0) as i32
+        }
+        _ => 0,
+    }
+}
+
+/// 请求 XML API（Moebooru）并解析
+async fn fetch_xml_posts(
+    client: &reqwest::Client,
+    api_url: &str,
+    base_url: &str,
+) -> Result<Posts, String> {
+    let response = client.get(api_url)
+        .header("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36")
+        .header("Accept", "application/xml, text/xml, */*;q=0.9")
+        .header("Accept-Language", "en-US,en;q=0.9,zh-CN;q=0.8,zh;q=0.7")
+        .header("Referer", &format!("https://{}/", base_url))
+        .send().await.map_err(|e| e.to_string())?;
 
     if !response.status().is_success() {
         return Err(format!("Request failed: {}", response.status()));
     }
 
     let xml = response.text().await.map_err(|e| e.to_string())?;
+    let xml = xml.strip_prefix('\u{FEFF}').unwrap_or(&xml);
+    serde_xml_rs::from_str(xml).map_err(|e| format!("XML parse error: {}", e))
+}
 
-    let posts: Posts = serde_xml_rs::from_str(&xml)
-        .map_err(|e| format!("XML parse error: {}", e))?;
-    Ok(posts)
+fn rename_field(obj: &mut serde_json::Map<String, serde_json::Value>, from: &str, to: &str) {
+    if let Some(val) = obj.remove(from) {
+        obj.insert(to.to_string(), val);
+    }
 }
 
 
