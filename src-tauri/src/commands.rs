@@ -79,7 +79,21 @@ fn build_api_url(
     login: &Option<String>,
     api_key: &Option<String>,
 ) -> String {
-    if base_url.contains("gelbooru") {
+    if base_url.contains("rule34") {
+        // rule34 用 rating:explicit/questionable/safe 而非 rating:e/q/s
+        let tags_str = tags.as_deref().unwrap_or("")
+            .replace("rating:e", "rating:explicit")
+            .replace("rating:q", "rating:questionable")
+            .replace("rating:s", "rating:general");
+        let mut url = format!(
+            "https://{}/index.php?page=dapi&s=post&q=index&pid={}&limit={}&tags={}",
+            base_url, page.unwrap_or(1).saturating_sub(1), limit.unwrap_or(100), tags_str
+        );
+        if let (Some(ref uid), Some(ref key)) = (login, api_key) {
+            url.push_str(&format!("&user_id={}&api_key={}", uid, key));
+        }
+        url
+    } else if base_url.contains("gelbooru") {
         let pid = page.unwrap_or(1).saturating_sub(1);
         let mut url = format!(
             "https://{}/index.php?page=dapi&s=post&q=index&json=1&pid={}&limit={}&tags={}",
@@ -129,12 +143,16 @@ async fn fetch_json_posts(
         .header("Referer", &format!("https://{}/", base_url))
         .send().await.map_err(|e| e.to_string())?;
 
-    if !response.status().is_success() {
-        return Err(format!("Request failed: {}", response.status()));
+    let status = response.status();
+    let body = response.text().await.map_err(|e| e.to_string())?;
+    if !status.is_success() {
+        return Err(format!("Request failed: {} body:{}", status, body.chars().take(300).collect::<String>()));
     }
 
-    let json: serde_json::Value = response.json().await
-        .map_err(|e| format!("JSON parse error: {}", e))?;
+    let preview: String = body.chars().take(500).collect();
+    println!("response preview: {}", preview);
+    let json: serde_json::Value = serde_json::from_str(&body)
+        .map_err(|e| format!("JSON parse error: {} (preview: {})", e, preview))?;
 
     let raw_posts: Vec<serde_json::Value> = if let Some(arr) = json.as_array() {
         arr.clone()
@@ -153,6 +171,8 @@ async fn fetch_json_posts(
 
     let count = if is_danbooru {
         fetch_danbooru_count(client, base_url, tags).await
+    } else if base_url.contains("rule34") || base_url.contains("gelbooru") {
+        json["count"].as_i64().unwrap_or(posts.len() as i64) as i32
     } else {
         json["@attributes"]["count"].as_i64().unwrap_or(posts.len() as i64) as i32
     };
@@ -172,10 +192,9 @@ fn normalize_fields(obj: &mut serde_json::Map<String, serde_json::Value>, is_dan
     if let Some(serde_json::Value::String(ts)) = obj.get("created_at").cloned() {
         let timestamp = chrono::DateTime::parse_from_rfc3339(&ts)
             .map(|dt| dt.timestamp())
-            .or_else(|_| {
-                chrono::NaiveDateTime::parse_from_str(&ts, "%a %b %d %H:%M:%S %z %Y")
-                    .map(|dt| dt.and_utc().timestamp())
-            })
+            .or_else(|_| chrono::NaiveDateTime::parse_from_str(&ts, "%a %b %d %H:%M:%S %z %Y").map(|dt| dt.and_utc().timestamp()))
+            .or_else(|_| chrono::NaiveDateTime::parse_from_str(&ts, "%Y-%m-%d %H:%M:%S").map(|dt| dt.and_utc().timestamp()))
+            .or_else(|_| chrono::NaiveDate::parse_from_str(&ts, "%Y-%m-%d").map(|d| d.and_hms_opt(0,0,0).unwrap().and_utc().timestamp()))
             .unwrap_or(0);
         obj.insert("created_at".to_string(), serde_json::Value::Number(timestamp.into()));
     }
@@ -234,26 +253,45 @@ fn rename_field(obj: &mut serde_json::Map<String, serde_json::Value>, from: &str
 }
 
 
+/// 根据图片 URL 返回合适的 Referer 头
+fn get_ua_for_image(url: &str) -> &str {
+    if url.contains("donmai") {
+        "PictureDown/1.0 (xukejian11)"
+    } else {
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/114.0.0.0 Safari/537.36"
+    }
+}
+
+fn get_referer_for_image(url: &str) -> &str {
+    if url.contains("donmai") || url.contains("cdn.donmai") {
+        "https://danbooru.donmai.us/"
+    } else if url.contains("gelbooru") || url.contains("img3.gelbooru") {
+        "https://gelbooru.com/"
+    } else if url.contains("rule34") {
+        "https://rule34.xxx/"
+    } else {
+        ""
+    }
+}
+
 #[tauri::command]
 async fn fetch_image_as_bytes(url: String) -> Result<Vec<u8>, String> {
-    // 创建一个基本的客户端配置
     let client = reqwest::Client::builder()
-        .user_agent("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/114.0.0.0 Safari/537.36")
-        .danger_accept_invalid_certs(true) // 忽略证书错误
+        .danger_accept_invalid_certs(true)
         .build()
         .map_err(|e| format!("Failed to create client: {}", e))?;
 
- 
+    let ua = get_ua_for_image(&url);
+    let referer = get_referer_for_image(&url);
+    let mut req = client.get(&url).header("Accept", "image/*").header("User-Agent", ua);
+    if !referer.is_empty() {
+        req = req.header("Referer", referer);
+    }
 
-    match client.get(&url).header("Accept", "image/*").send().await {
+    match req.send().await {
         Ok(response) => {
             if response.status().is_success() {
-                match response.bytes().await {
-                    Ok(bytes) => {
-                        Ok(bytes.to_vec())
-                    }
-                    Err(e) => Err(format!("Failed to read image bytes: {}", e)),
-                }
+                response.bytes().await.map(|b| b.to_vec()).map_err(|e| format!("Failed to read image bytes: {}", e))
             } else {
                 Err(format!("Request failed with status: {}", response.status()))
             }
@@ -266,62 +304,56 @@ async fn fetch_image_as_bytes(url: String) -> Result<Vec<u8>, String> {
 async fn fetch_image_to_local(url: String, cache_dir: String, filename: String) -> Result<String, String> {
     let file_path = std::path::Path::new(&cache_dir).join(&filename);
 
-    // 如果本地已缓存，直接返回路径
     if file_path.exists() {
         return Ok(file_path.to_string_lossy().to_string());
     }
 
-    // 确保缓存目录存在
     std::fs::create_dir_all(&cache_dir)
         .map_err(|e| format!("Failed to create cache dir: {}", e))?;
 
     let client = reqwest::Client::builder()
-        .user_agent("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/114.0.0.0 Safari/537.36")
         .danger_accept_invalid_certs(true)
         .build()
         .map_err(|e| format!("Failed to create client: {}", e))?;
 
-    let response = client
-        .get(&url)
-        .header("Accept", "image/*")
-        .send()
-        .await
-        .map_err(|e| format!("Failed to send request: {}", e))?;
+    let ua = get_ua_for_image(&url);
+    let referer = get_referer_for_image(&url);
+    let mut req = client.get(&url).header("Accept", "image/*").header("User-Agent", ua);
+    if !referer.is_empty() {
+        req = req.header("Referer", referer);
+    }
+
+    let response = req.send().await.map_err(|e| format!("Failed to send request: {}", e))?;
 
     if !response.status().is_success() {
         return Err(format!("Request failed with status: {}", response.status()));
     }
 
-    let bytes = response
-        .bytes()
-        .await
-        .map_err(|e| format!("Failed to read image bytes: {}", e))?;
-
-    std::fs::write(&file_path, &bytes)
-        .map_err(|e| format!("Failed to write file: {}", e))?;
-
+    let bytes = response.bytes().await.map_err(|e| format!("Failed to read image bytes: {}", e))?;
+    std::fs::write(&file_path, &bytes).map_err(|e| format!("Failed to write file: {}", e))?;
     Ok(file_path.to_string_lossy().to_string())
 }
 
 #[tauri::command]
 async fn fetch_image_as_base64(url: String) -> Result<String, String> {
-    // 创建一个基本的客户端配置
     let client = reqwest::Client::builder()
-        .user_agent("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/114.0.0.0 Safari/537.36")
-        .danger_accept_invalid_certs(true) // 忽略证书错误
+        .danger_accept_invalid_certs(true)
         .build()
         .map_err(|e| format!("Failed to create client: {}", e))?;
 
-    match client.get(&url).header("Accept", "image/*").send().await {
+    let ua = get_ua_for_image(&url);
+    let referer = get_referer_for_image(&url);
+    let mut req = client.get(&url).header("Accept", "image/*").header("User-Agent", ua);
+    if !referer.is_empty() {
+        req = req.header("Referer", referer);
+    }
+
+    match req.send().await {
         Ok(response) => {
             if response.status().is_success() {
-                match response.bytes().await {
-                    Ok(bytes) => {
-                        let base64_string = base64::encode(&bytes);
-                        Ok(base64_string)
-                    }
-                    Err(e) => Err(format!("Failed to read image bytes: {}", e)),
-                }
+                response.bytes().await
+                    .map(|b| base64::encode(&b))
+                    .map_err(|e| format!("Failed to read image bytes: {}", e))
             } else {
                 Err(format!("Request failed with status: {}", response.status()))
             }
@@ -330,6 +362,35 @@ async fn fetch_image_as_base64(url: String) -> Result<String, String> {
     }
 }
 
+
+#[tauri::command]
+async fn download_file(url: String, save_path: String) -> Result<(), String> {
+    let client = reqwest::Client::builder()
+        .danger_accept_invalid_certs(true)
+        .build()
+        .map_err(|e| format!("Failed to create client: {}", e))?;
+
+    let ua = get_ua_for_image(&url);
+    let referer = get_referer_for_image(&url);
+    let mut req = client.get(&url).header("Accept", "image/*").header("User-Agent", ua);
+    if !referer.is_empty() {
+        req = req.header("Referer", referer);
+    }
+
+    let response = req.send().await.map_err(|e| format!("Failed to send request: {}", e))?;
+
+    if !response.status().is_success() {
+        return Err(format!("Request failed with status: {}", response.status()));
+    }
+
+    let bytes = response.bytes().await.map_err(|e| format!("Failed to read bytes: {}", e))?;
+
+    if let Some(parent) = std::path::Path::new(&save_path).parent() {
+        std::fs::create_dir_all(parent).map_err(|e| format!("Failed to create dir: {}", e))?;
+    }
+    std::fs::write(&save_path, &bytes).map_err(|e| format!("Failed to write file: {}", e))?;
+    Ok(())
+}
 
 #[tauri::command]
 async fn grant_path_access(app_handle: tauri::AppHandle, path: String) -> Result<(), String> {
@@ -352,7 +413,7 @@ pub fn run() {
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_upload::init())
         .plugin(tauri_plugin_cache::init())
-        .invoke_handler(tauri::generate_handler![fetch_html, fetch_posts, fetch_image_as_base64, fetch_image_as_bytes, fetch_image_to_local, grant_path_access])
+        .invoke_handler(tauri::generate_handler![fetch_html, fetch_posts, fetch_image_as_base64, fetch_image_as_bytes, fetch_image_to_local, download_file, grant_path_access])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
 }

@@ -56,13 +56,17 @@ async function loadImage(url, filename) {
 async function loadCurrentImage() {
   currentImageUrl.value = null;
   const img = selectedImage.value;
-  if (!img?.file_url) {
-    return;
-  }
+  if (!img) return;
+
+  // .zip/.rar 等非图片格式用预览图代替
+  const imageExts = ['jpg', 'jpeg', 'png', 'gif', 'webp', 'bmp', 'avif'];
+  const ext = (img.file_ext || img.file_url?.split('.').pop()?.split('?')[0] || 'jpg').toLowerCase();
+  const viewUrl = imageExts.includes(ext) ? img.file_url : (img.sample_url || img.preview_url || img.file_url);
+  const viewExt = imageExts.includes(ext) ? ext : 'jpg';
 
   loadingImage.value = true;
-  const filename = `${img.md5}.${img.file_ext}`;
-  const imgUrl = await loadImage(img.file_url, filename);
+  const filename = `${img.md5}.${viewExt}`;
+  const imgUrl = await loadImage(viewUrl, filename);
   if (imgUrl) {
     currentImageUrl.value = imgUrl;
   } else {

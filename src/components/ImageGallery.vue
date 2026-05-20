@@ -1,7 +1,6 @@
 <script setup>
 import { ref, computed, onUnmounted, onMounted } from "vue";
 import { invoke } from "@tauri-apps/api/core";
-import { download } from "@tauri-apps/plugin-upload";
 import { open } from "@tauri-apps/plugin-dialog";
 import { downloadDir, join } from "@tauri-apps/api/path";
 import { exists, remove } from "@tauri-apps/plugin-fs";
@@ -163,10 +162,10 @@ async function downloadFile(img) {
       return;
     }
 
-    await download(
-      picture.largeUrl, // 文件下载 URL
-      savePath // 本地保存路径
-    );
+    await invoke("download_file", {
+      url: picture.largeUrl,
+      savePath,
+    });
     ElMessage.success("下载成功！");
   } catch (error) {
     console.error("下载失败:", error);
@@ -229,7 +228,7 @@ async function batchDownload() {
         downloadItem.status = 'exists';
         downloadItem.progress = 100;
       } else {
-        await download(img.largeUrl, savePath);
+        await invoke("download_file", { url: img.largeUrl, savePath });
         downloadItem.status = 'completed';
         downloadItem.progress = 100;
       }
@@ -327,6 +326,7 @@ async function fetchPosts() {
           dimensions: `${post.width}x${post.height}`,
           // 大图URL用于模态框显示
           largeUrl: post.file_url,
+          file_ext: post.file_ext || post.file_url?.split('.').pop()?.split('?')[0] || 'jpg',
           loading: false,
           imageLoaded: false
         }
@@ -401,6 +401,20 @@ function handleImageError(event, index) {
   // 第2次：尝试 sample_url
   if (img._loadAttempt === 2 && img.sample_url && img.sample_url !== img.src) {
     event.target.src = img.sample_url;
+    return;
+  }
+  // 第3次：通过 Rust 后端代理（带正确 Referer）
+  if (img._loadAttempt === 3 && img.largeUrl) {
+    const md5 = img.md5;
+    invoke("fetch_image_as_base64", { url: img.largeUrl }).then(base64 => {
+      const idx = images.value.findIndex(i => i.md5 === md5);
+      if (idx >= 0) {
+        images.value[idx].src = `data:image/jpeg;base64,${base64}`;
+      }
+    }).catch(() => {
+      const idx = images.value.findIndex(i => i.md5 === md5);
+      if (idx >= 0) images.value.splice(idx, 1);
+    });
     return;
   }
 

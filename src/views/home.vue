@@ -32,6 +32,13 @@ const sites = [
     route: '/gelbooru',
     color: '#67c23a',
   },
+  {
+    key: 'rule34',
+    name: 'Rule34',
+    description: '知名图站，内容广泛不受限',
+    route: '/rule34',
+    color: '#9c27b0',
+  },
   // 后续可以在此添加更多图站
 ];
 </script>

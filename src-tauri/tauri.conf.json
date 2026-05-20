@@ -30,7 +30,9 @@
           "https://konachan.com",
           "https://konachan.net",
           "https://danbooru.donmai.us",
-          "https://gelbooru.com"
+          "https://gelbooru.com",
+          "https://rule34.xxx",
+          "https://api.rule34.xxx"
         ],
         "img-src": [
           "'self'",
@@ -45,7 +47,9 @@
           "https://cdn.donmai.us",
           "https://gelbooru.com",
           "https://img3.gelbooru.com",
-          "https://video-cdn3.gelbooru.com"
+          "https://video-cdn3.gelbooru.com",
+          "https://us.rule34.xxx",
+          "https://api-cdn.rule34.xxx"
         ],
         "style-src": ["'self'", "'unsafe-inline'"],
         "script-src": ["'self'"],

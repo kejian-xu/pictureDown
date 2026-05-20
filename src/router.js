@@ -5,6 +5,7 @@ import YandeView from './views/yande.vue'
 import KonachanView from './views/konachan.vue'
 import DanbooruView from './views/danbooru.vue'
 import GelbooruView from './views/gelbooru.vue'
+import Rule34View from './views/rule34.vue'
 import InfoView from './views/info.vue'
 
 const routes = [
@@ -13,6 +14,7 @@ const routes = [
   { path: '/konachan', component: KonachanView },
   { path: '/danbooru', component: DanbooruView },
   { path: '/gelbooru', component: GelbooruView },
+  { path: '/rule34', component: Rule34View },
   { path: '/info', component: InfoView }
 ]
 
