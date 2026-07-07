@@ -143,16 +143,12 @@ async fn fetch_json_posts(
         .header("Referer", &format!("https://{}/", base_url))
         .send().await.map_err(|e| e.to_string())?;
 
-    let status = response.status();
-    let body = response.text().await.map_err(|e| e.to_string())?;
-    if !status.is_success() {
-        return Err(format!("Request failed: {} body:{}", status, body.chars().take(300).collect::<String>()));
+    if !response.status().is_success() {
+        return Err(format!("Request failed: {}", response.status()));
     }
 
-    let preview: String = body.chars().take(500).collect();
-    println!("response preview: {}", preview);
-    let json: serde_json::Value = serde_json::from_str(&body)
-        .map_err(|e| format!("JSON parse error: {} (preview: {})", e, preview))?;
+    let json: serde_json::Value = response.json().await
+        .map_err(|e| format!("JSON parse error: {}", e))?;
 
     let raw_posts: Vec<serde_json::Value> = if let Some(arr) = json.as_array() {
         arr.clone()
@@ -190,13 +186,9 @@ fn normalize_fields(obj: &mut serde_json::Map<String, serde_json::Value>, is_dan
         rename_field(obj, "image_height", "height");
     }
     if let Some(serde_json::Value::String(ts)) = obj.get("created_at").cloned() {
-        let timestamp = chrono::DateTime::parse_from_rfc3339(&ts)
-            .map(|dt| dt.timestamp())
-            .or_else(|_| chrono::NaiveDateTime::parse_from_str(&ts, "%a %b %d %H:%M:%S %z %Y").map(|dt| dt.and_utc().timestamp()))
-            .or_else(|_| chrono::NaiveDateTime::parse_from_str(&ts, "%Y-%m-%d %H:%M:%S").map(|dt| dt.and_utc().timestamp()))
-            .or_else(|_| chrono::NaiveDate::parse_from_str(&ts, "%Y-%m-%d").map(|d| d.and_hms_opt(0,0,0).unwrap().and_utc().timestamp()))
-            .unwrap_or(0);
-        obj.insert("created_at".to_string(), serde_json::Value::Number(timestamp.into()));
+        if let Some(t) = parse_date_string(&ts) {
+            obj.insert("created_at".to_string(), serde_json::Value::Number(t.into()));
+        }
     }
 }
 
@@ -243,7 +235,36 @@ async fn fetch_xml_posts(
 
     let xml = response.text().await.map_err(|e| e.to_string())?;
     let xml = xml.strip_prefix('\u{FEFF}').unwrap_or(&xml);
-    serde_xml_rs::from_str(xml).map_err(|e| format!("XML parse error: {}", e))
+    let mut posts: Posts = serde_xml_rs::from_str(xml).map_err(|e| format!("XML parse error: {}", e))?;
+    // 修复 created_at：日期字符串 → Unix 时间戳（rule34 等站返回日期字符串）
+    for p in &mut posts.posts {
+        if let Some(obj) = p.as_object_mut() {
+            if let Some(serde_json::Value::String(ts)) = obj.get("created_at").cloned() {
+                if let Some(t) = parse_date_string(&ts) {
+                    obj.insert("created_at".to_string(), serde_json::Value::Number(t.into()));
+                }
+            }
+        }
+    }
+    Ok(posts)
+}
+
+fn parse_date_string(ts: &str) -> Option<i64> {
+    if let Ok(dt) = chrono::DateTime::parse_from_rfc3339(ts) {
+        return Some(dt.timestamp());
+    }
+    if let Ok(dt) = chrono::DateTime::parse_from_str(ts, "%a %b %d %H:%M:%S %z %Y") {
+        return Some(dt.timestamp());
+    }
+    if let Ok(dt) = chrono::NaiveDateTime::parse_from_str(ts, "%Y-%m-%d %H:%M:%S") {
+        return Some(dt.and_utc().timestamp());
+    }
+    if let Ok(d) = chrono::NaiveDate::parse_from_str(ts, "%Y-%m-%d") {
+        if let Some(dt) = d.and_hms_opt(0, 0, 0) {
+            return Some(dt.and_utc().timestamp());
+        }
+    }
+    None
 }
 
 fn rename_field(obj: &mut serde_json::Map<String, serde_json::Value>, from: &str, to: &str) {

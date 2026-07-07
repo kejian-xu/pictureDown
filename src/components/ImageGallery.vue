@@ -21,6 +21,7 @@ const props = defineProps({
 
 /** 搜索标签 */
 const tags = ref("");
+const tagValue = ref(""); // 用于显示在全部标签对话框中的标签值
 
 /** 图片列表 */
 const images = ref([]);
@@ -75,6 +76,12 @@ const downloadList = ref([]);
 
 /** 是否显示选择复选框 */
 const showCheckboxes = ref(false);
+
+/** 全部标签对话框显示状态 */
+const showAllTagsDialog = ref(false);
+
+/** 当前查看全部标签的图片数据 */
+const allTagsData = ref({ tags: [], md5: '', dimensions: '' });
 
 /** 模态框显示状态 */
 const showModal = computed(() => selectedImageIndex.value !== null);
@@ -320,6 +327,7 @@ async function fetchPosts() {
         let imageUrl = post.preview_url;
         return{
           ...post,
+          tags: post.tags.split(' ').filter(tag => tag.trim() !== ''), // 过滤空标签并重新组合
           src: imageUrl,
           alt: post.tags,
           created_at: formatTimestamp(post.created_at, "datetime"),
@@ -430,6 +438,18 @@ function handleImageError(event, index) {
 function handleTags(tag) {
   tags.value = tag;
   fetchPosts();
+}
+
+/**
+ * 打开全部标签对话框
+ * @param {Object} img - 图片对象
+ */
+function openAllTagsDialog(img) {
+  allTagsData.value = {
+    tags: img.tags
+  };
+  tagValue.value = "";
+  showAllTagsDialog.value = true;
 }
 
 
@@ -675,8 +695,8 @@ function selectAllImages() {
               <span class="image-score"><i>尺寸:</i>{{img.dimensions}};<i>时间:</i>{{ img.created_at }}</span>
             </div>
             <div class="image-tags" >
-              <el-tag @click="handleTags(tag)" type="primary" v-for="tag in img.tags.split(' ').slice(0, 10)" :key="tag">{{ tag }}</el-tag>
-              <el-tag v-if="img.tags.split(' ').length > 10" type="info">+{{ img.tags.split(' ').length - 10 }}</el-tag>
+              <el-tag @click="handleTags(tag)" type="primary" v-for="tag in img.tags.slice(0, 10)" :key="tag">{{ tag }}</el-tag>
+              <el-tag v-if="img.tags.length > 10" type="info" style="cursor: pointer;" @click="openAllTagsDialog(img)">+{{ img.tags.length - 10 }}</el-tag>
             </div>
              <div class="image-download" >
               <el-button :loading="img.loading" type="primary" round icon="Download" @click="downloadFile(img)"></el-button>
@@ -847,6 +867,30 @@ function selectAllImages() {
           <el-button @click="closeDownloadList" :disabled="isBatchDownloading">
             {{ isBatchDownloading ? '下载中...' : '关闭' }}
           </el-button>
+        </span>
+      </template>
+    </el-dialog>
+
+    <!-- 全部标签对话框 -->
+    <el-dialog v-model="showAllTagsDialog" title="全部标签" width="600px">
+      <div class="all-tags-header">
+        <span class="all-tags-image-info"><el-input v-model="tagValue"></el-input></span>
+        <span class="all-tags-count">共 {{ allTagsData.tags.length }} 个标签</span>
+      </div>
+      <div class="all-tags-container">
+        <el-tag
+          v-for="tag in allTagsData.tags.filter(t => t.includes(tagValue))"
+          :key="tag"
+          type="primary"
+          class="all-tags-item"
+          @click="handleTags(tag); showAllTagsDialog = false"
+        >
+          {{ tag }}
+        </el-tag>
+      </div>
+      <template #footer>
+        <span class="dialog-footer">
+          <el-button @click="showAllTagsDialog = false">关闭</el-button>
         </span>
       </template>
     </el-dialog>
@@ -1390,5 +1434,46 @@ pre {
   justify-content: center;
   width: 40px;
   flex-shrink: 0;
+}
+
+/* ============ 全部标签对话框样式 ============ */
+
+.all-tags-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 16px;
+  padding-bottom: 12px;
+  border-bottom: 1px solid var(--el-border-color-light, #e4e7ed);
+}
+
+.all-tags-image-info {
+  font-size: 13px;
+  color: var(--el-text-color-secondary, #909399);
+  word-break: break-all;
+}
+
+.all-tags-count {
+  font-size: 12px;
+  color: var(--el-text-color-secondary, #909399);
+  flex-shrink: 0;
+  margin-left: 12px;
+}
+
+.all-tags-container {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  max-height: 400px;
+  overflow-y: auto;
+  padding: 4px 0;
+}
+
+.all-tags-item {
+  cursor: pointer;
+}
+
+.all-tags-item:hover {
+  opacity: 0.8;
 }
 </style>

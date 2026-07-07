@@ -6,14 +6,14 @@ const router = useRouter();
 const sites = [
   {
     key: 'yande',
-    name: 'yande.re',
+    name: 'Yande.re',
     description: '高分辨率动漫风格图片站',
     route: '/yande',
     color: '#409eff',
   },
   {
     key: 'konachan',
-    name: 'konachan.com',
+    name: 'Konachan',
     description: '动漫壁纸图片站，支持标签搜索与批量下载',
     route: '/konachan',
     color: '#e6a23c',
