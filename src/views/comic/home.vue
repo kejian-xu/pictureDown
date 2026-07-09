@@ -16,7 +16,19 @@ const name = route.query.name || "177comic";
 const site = siteConfig[name];
 const mainUrl = site?.main_url || "";
 const homeUrl = mainUrl + (site?.home?.url || "/");
+const protocolPrefix = site?.protocol_prefix || "https:";
 const parseConfig = site?.home?.parseConfig || {};
+const detailPathRegex = site?.home?.detail_path_regex
+  ? new RegExp(site.home.detail_path_regex)
+  : null;
+
+/** 统一URL补全：处理 // 协议相对、/绝对路径、相对路径 */
+function resolveUrl(href, base) {
+  if (href.startsWith("http")) return href;
+  if (href.startsWith("//")) return protocolPrefix + href;
+  if (href.startsWith("/")) return base + href;
+  return `${base}/${href}`;
+}
 
 // ============ 响应式数据 ============
 
@@ -30,15 +42,6 @@ const loading = ref(false);
 const error = ref("");
 
 // ============ HTML 解析 ============
-
-/**
- * 拼接相对URL为绝对URL
- */
-function resolveUrl(href, base) {
-  if (href.startsWith("http")) return href;
-  if (href.startsWith("/")) return `${base}${href}`;
-  return `${base}/${href}`;
-}
 
 /**
  * 使用 cheerio 解析漫画站HTML，提取图片信息
@@ -66,12 +69,21 @@ function parseComicHtml(html, baseUrl, config) {
       const title = $img.attr(cfg.title_attr || "alt") || "";
 
       const postUrl = resolveUrl(href, base);
-      const thumbUrl = src;
+      const thumbUrl = resolveUrl(src, base);
+
+      // 从 post_url 的相对路径中提取 detailPath
+      let detailPath = "";
+      if (detailPathRegex) {
+        const path = postUrl.replace(mainUrl, "");
+        const m = path.match(detailPathRegex);
+        if (m) detailPath = m[1];
+      }
 
       posts.push({
         thumb_url: thumbUrl,
         post_url: postUrl,
-        title
+        title,
+        detailPath,
       });
     });
   });
@@ -122,7 +134,9 @@ async function fetchData() {
 // ============ 图片交互 ============
 
 function handleImageClick(img) {
-  if (img.post_url) {
+  if (img.detailPath) {
+    router.push({ path: '/comic/detail', query: { detailPath: img.detailPath, name } });
+  } else if (img.post_url) {
     router.push({ path: '/comic/detail', query: { url: img.post_url, name } });
   }
 }

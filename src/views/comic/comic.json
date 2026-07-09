@@ -1,8 +1,10 @@
 {
   "177comic": {
     "main_url": "https://www.177pica.com",
+    "protocol_prefix": "https:",
     "home": {
       "url": "/",
+      "detail_path_regex": "/html/(.+)\\.html$",
       "parseConfig": {
         "item_selector": "figure.picture-img",
         "link_selector": "a",
@@ -14,7 +16,9 @@
     },
     "detail": {
       "url": "/html/{detailPath}.html",
+      "extract_method": "css",
       "parseConfig": {
+        "page": true,
         "img_selector": ".single-content img",
         "src_attrs": ["data-lazy-src", "src"],
         "page_size_selector": ".page-links a",
@@ -23,9 +27,11 @@
     }
   },
   "wnacg": {
-    "main_url": "https://www.wnacg.com",
+    "main_url": "https://www.wn07.cfd",
+    "protocol_prefix": "https:",
     "home": {
       "url": "/",
+      "detail_path_regex": "/photos-index-aid-(\\d+)\\.html$",
       "parseConfig": {
         "item_selector": ".gallary_item",
         "link_selector": "a",
@@ -36,11 +42,15 @@
       }
     },
     "detail": {
-      "url": "/photos-slide-aid-{detailPath}.html",
+      "url": "/photos-item-aid-{detailPath}.html",
+      "extract_method": "string",
+      "script_match": "mReader\\.initData\\(([\\s\\S]*?)\\);",
+      "img_url_key": "page_url",
       "parseConfig": {
-        "img_selector": ".single-content img",
-        "src_attrs": ["data-lazy-src", "src"],
-        "page_size_selector": ".page-links a",
+        "page": false,
+        "img_selector": ".pic_box a img",
+        "src_attrs": ["src"],
+        "page_size_selector": ".paginator span a",
         "deduplicate": true
       }
     }

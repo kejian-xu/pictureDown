@@ -14,13 +14,37 @@ const route = useRoute();
 const name = route.query.name || "177comic";
 const site = siteConfig[name];
 const mainUrl = site?.main_url || "";
+const protocolPrefix = site?.protocol_prefix || "https:";
 const detailParseConfig = site?.detail?.parseConfig || {};
 const detailUrlTemplate = site?.detail?.url || "";
+const extractMethod = site?.detail?.extract_method || "css";
+const hasPage = detailParseConfig.page === true;
+const scriptMatchRegex = site?.detail?.script_match
+  ? new RegExp(site.detail.script_match, "s")
+  : null;
+const imgUrlKey = site?.detail?.img_url_key || "page_url";
+
+/** 统一URL补全：处理 // 协议相对、/绝对路径、相对路径 */
+function resolveUrl(href, base) {
+  if (href.startsWith("http")) return href;
+  if (href.startsWith("//")) return protocolPrefix + href;
+  if (href.startsWith("/")) return base + href;
+  return `${base}/${href}`;
+}
 
 // ============ 响应式数据 ============
 
-/** 图片列表 */
+/** 图片列表（已加载的base64） */
 const images = ref([]);
+
+/** 所有原始URL（当前页解析后暂存，加载后清空） */
+const allUrls = ref([]);
+
+/** 已加载数量 */
+const loadedCount = ref(0);
+
+/** 每批加载数量 */
+const BATCH_SIZE = 5;
 
 /** 加载状态 */
 const loading = ref(false);
@@ -31,37 +55,34 @@ const loadingMore = ref(false);
 /** 错误信息 */
 const error = ref("");
 
-/** 总数量 */
-const total = ref(0);
+/** 是否还有更多（图片/页）待加载 */
+const hasMore = ref(true);
 
-/** 详情页 URL */
-const detailUrl = ref("");
+/** ---- 分页模式专用 ---- */
+
+/** 分页链接列表 */
+const pageLinks = ref([]);
 
 /** 当前子页码 */
 const subPage = ref(1);
 
-/** 是否还有更多页 */
-const hasMore = ref(true);
-
-/** 总页数（从 page-links 解析） */
-const totalPages = ref(0);
-const pages = ref([])
-
 // ============ 生命周期 ============
 
-let scrollHandler = null;
-
-
-
 onMounted(() => {
-  const url = route.query.url;
   if (!site) {
     error.value = `未找到站点配置: ${name}`;
     return;
   }
+  const detailPath = route.query.detailPath;
+  const directUrl = route.query.url;
+  let url;
+  if (detailPath && detailUrlTemplate) {
+    url = mainUrl + detailUrlTemplate.replace("{detailPath}", detailPath);
+  } else if (directUrl) {
+    url = directUrl;
+  }
   if (url) {
-    detailUrl.value = url;
-    fetchDetail(url,1)
+    fetchDetail(url);
   } else {
     error.value = "缺少详情页地址";
   }
@@ -70,97 +91,131 @@ onMounted(() => {
 onUnmounted(() => {
 });
 
-// ============ 数据获取 ============
+// ============ URL 提取 ============
 
-
-/** 前端解析HTML，提取详情页图片URL列表，并转换为base64 */
-async function parseDetailHtml(html) {
-  const $ = cheerio.load(html);
+/** CSS选择器方式提取图片URL */
+function extractUrlsByCss($) {
   const urls = [];
-
-  $(detailParseConfig.img_selector).each((index, element) => {
+  $(detailParseConfig.img_selector).each((_, el) => {
     let src = "";
     for (const attr of detailParseConfig.src_attrs) {
-      const val = $(element).attr(attr);
+      const val = $(el).attr(attr);
       if (val && !val.startsWith("data:")) {
         src = val;
         break;
       }
     }
-    if (src) {
-      // 相对URL补全为绝对URL
-      urls.push(src.startsWith("http") ? src : mainUrl + src);
+    if (src) urls.push(resolveUrl(src, mainUrl));
+  });
+  return urls;
+}
+
+/** script_json方式：从<script>标签中匹配JS数据，直接正则提取图片URL */
+function extractUrlsByScriptJson($) {
+  const urls = [];
+  $("script").each((_, el) => {
+    const text = $(el).html();
+    if (!text || !text.includes(imgUrlKey)) return;
+    const m = text.match(scriptMatchRegex);
+    if (!m || !m[1]) return;
+    const urlMatches = m[1].match(/"(https?:\/\/[^"]+)"/g);
+    if (urlMatches) {
+      for (const u of urlMatches) {
+        urls.push(resolveUrl(u.slice(1, -1), mainUrl));
+      }
     }
   });
-  // 从 page-links 的 a 标签中提取总页数
-  const hrefs = [];
-  if(pages.value.length == 0) {
-    $(detailParseConfig.page_size_selector).each((i, el) => {
-      let href = $(el).attr("href")
-      if(href && !hrefs.includes(href)) {
-        hrefs.push(href);
-      }
-    });
-    pages.value = hrefs
-    totalPages.value = hrefs.length
-  }
-  
+  return urls;
+}
 
-  // 逐个获取图片的 base64 数据
-  for (const url of urls) {
+/** string方式：从字符串直接正则提取图片URL */
+function extractUrlsByString(str) {
+  const urls = [];
+  const urlMatches = str.match(/"(https?:\/\/[^"]+)"/g);
+  if (urlMatches) {
+    for (const u of urlMatches) {
+      urls.push(resolveUrl(u.slice(1, -1), mainUrl));
+    }
+  }
+  return urls;
+}
+
+/** 从HTML中提取分页链接 */
+function extractPageLinks($) {
+  const hrefs = [];
+  $(detailParseConfig.page_size_selector).each((_, el) => {
+    const href = $(el).attr("href");
+    if (href && !hrefs.includes(href)) hrefs.push(href);
+  });
+  return hrefs;
+}
+
+// ============ 数据获取 ============
+
+/** 解析HTML，提取图片URL和分页链接 */
+function parseDetailHtml(html) {
+  let urls = [];
+  if (extractMethod === "string") {
+    urls = extractUrlsByString(html);
+  } else {
+    const $ = cheerio.load(html);
+    urls = extractMethod === "script_json"
+      ? extractUrlsByScriptJson($)
+      : extractUrlsByCss($);
+
+    // 有分页时提取分页链接（仅首页提取一次）
+    if (hasPage && pageLinks.value.length === 0) {
+      pageLinks.value = extractPageLinks($);
+    }
+  }
+  allUrls.value = urls;
+  loadedCount.value = 0;
+}
+
+/** 加载下一批图片 */
+async function loadNextBatch() {
+  if (loadingMore.value || loadedCount.value >= allUrls.value.length) return;
+  loadingMore.value = true;
+
+  const batch = allUrls.value.slice(loadedCount.value, loadedCount.value + BATCH_SIZE);
+  for (const url of batch) {
     try {
       const base64Url = await fetchImageBase64(url);
-      if (base64Url) {
-        images.value.push(base64Url);
-      }
+      images.value.push(base64Url || url);
     } catch (e) {
       console.error("获取图片失败:", url, e);
-      // 失败时也保留原 URL，让 el-image 尝试直接加载
       images.value.push(url);
     }
   }
-}
+  loadedCount.value += batch.length;
 
-
-/** 获取详情页图片 */
-async function fetchDetail(url, page) {
-  if (page === 1) {
-    loading.value = true;
-    error.value = "";
+  // 当前页还有图片 → 继续；否则 → 有分页就加载下一页，没有就结束
+  const pageExhausted = loadedCount.value >= allUrls.value.length;
+  if (pageExhausted && hasPage && subPage.value < pageLinks.value.length) {
+    hasMore.value = true; // 下一页还在加载中，保持 true
+  } else if (pageExhausted) {
+    hasMore.value = false;
+  } else {
+    hasMore.value = true;
   }
-
-  try {
-    const pageUrl = url;
-    const html = await invoke("fetch_html", { url: pageUrl });
-    await parseDetailHtml(html);
-    // 判断是否还有下一页
-    hasMore.value = subPage.value < totalPages.value;
-  } finally {
-    loading.value = false;
-    loadingMore.value = false;
-  }
-}
-function loadMore() {
-  console.log('loadMore')
-  if (loading.value || loadingMore.value || !hasMore.value) return;
-  loadNextPage();
+  loadingMore.value = false;
 }
 
-/** 加载下一页 */
+/** 加载分页模式的下一页 */
 async function loadNextPage() {
-  if (loading.value || loadingMore.value || !hasMore.value) return;
-  loadingMore.value = true;
-  subPage.value++;
-  const rawUrl = pages.value[subPage.value - 1];
+  if (loadingMore.value) return;
+  const rawUrl = pageLinks.value[subPage.value];
   if (!rawUrl) {
     hasMore.value = false;
-    loadingMore.value = false;
     return;
   }
-  const pageUrl = rawUrl.startsWith("http") ? rawUrl : mainUrl + rawUrl;
+  loadingMore.value = true;
+  subPage.value++;
   try {
-    console.log('pageUrl',pageUrl,subPage.value)
-    await fetchDetail(pageUrl, subPage.value);
+    const pageUrl = resolveUrl(rawUrl, mainUrl);
+    const html = await invoke("fetch_html", { url: pageUrl });
+    parseDetailHtml(html);
+    await loadNextBatch();
   } catch (e) {
     console.error("加载下一页失败:", e);
     subPage.value--;
@@ -169,10 +224,33 @@ async function loadNextPage() {
   }
 }
 
+/** 获取详情页（解析HTML + 加载首批图片） */
+async function fetchDetail(url) {
+  loading.value = true;
+  error.value = "";
+  try {
+    const html = await invoke("fetch_html", { url });
+    parseDetailHtml(html);
+    await loadNextBatch();
+  } finally {
+    loading.value = false;
+    loadingMore.value = false;
+  }
+}
+
+/** 滚动加载更多：先尝试当前页的下一批，当前页耗尽时加载下一页 */
+function loadMore() {
+  if (loading.value || loadingMore.value) return;
+  if (loadedCount.value < allUrls.value.length) {
+    loadNextBatch();
+  } else if (hasPage && subPage.value < pageLinks.value.length) {
+    loadNextPage();
+  }
+}
+
 async function fetchImageBase64(url) {
-  console.log("url:", url);
-  if(url) {
-    let base64 =  await invoke("fetch_image_as_base64", { url })
+  if (url) {
+    const base64 = await invoke("fetch_image_as_base64", { url });
     return `data:image/jpeg;base64,${base64}`;
   }
 }
@@ -182,22 +260,20 @@ async function fetchImageBase64(url) {
 <template>
   <main>
     <div class="comic-section">
-      <!-- 搜索栏 -->
       <div class="comic-search-bar">
         <el-button icon="ArrowLeft" @click="$router.back()" circle />
       </div>
 
-      <!-- 错误信息 -->
       <div v-if="error" class="comic-error">{{ error }}</div>
 
-    <ul v-infinite-scroll="loadMore" :infinite-scroll-immediate="false" :infinite-scroll-distance="300" class="infinite-list">
-      <li v-for="(img, i) in images" :key="i" class="infinite-list-item">
-        <el-image :src="img" />
-      </li>
-    </ul>
-    <div v-if="loadingMore">
-      加载中。。。
-    </div>
+      <ul v-infinite-scroll="loadMore" :infinite-scroll-immediate="false" :infinite-scroll-distance="300" class="infinite-list">
+        <li v-for="(img, i) in images" :key="i" class="infinite-list-item">
+          <el-image :src="img" class="comic-image-box" />
+        </li>
+      </ul>
+      <div v-if="loadingMore" class="loading text-center">
+        加载中。。。
+      </div>
     </div>
   </main>
 </template>
@@ -252,7 +328,7 @@ async function fetchImageBase64(url) {
 }
 
 .comic-image-box {
-  width: 800px;
+  width: 1200px;
   margin: 0 auto;
 }
 
