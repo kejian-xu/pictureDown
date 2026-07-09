@@ -1,0 +1,48 @@
+{
+  "177comic": {
+    "main_url": "https://www.177pica.com",
+    "home": {
+      "url": "/",
+      "parseConfig": {
+        "item_selector": "figure.picture-img",
+        "link_selector": "a",
+        "img_selector": "img",
+        "title_attr": "alt",
+        "thumb_attr": "src",
+        "link_attr": "href"
+      }
+    },
+    "detail": {
+      "url": "/html/{detailPath}.html",
+      "parseConfig": {
+        "img_selector": ".single-content img",
+        "src_attrs": ["data-lazy-src", "src"],
+        "page_size_selector": ".page-links a",
+        "deduplicate": true
+      }
+    }
+  },
+  "wnacg": {
+    "main_url": "https://www.wnacg.com",
+    "home": {
+      "url": "/",
+      "parseConfig": {
+        "item_selector": ".gallary_item",
+        "link_selector": "a",
+        "img_selector": "img",
+        "title_attr": "alt",
+        "thumb_attr": "src",
+        "link_attr": "href"
+      }
+    },
+    "detail": {
+      "url": "/photos-slide-aid-{detailPath}.html",
+      "parseConfig": {
+        "img_selector": ".single-content img",
+        "src_attrs": ["data-lazy-src", "src"],
+        "page_size_selector": ".page-links a",
+        "deduplicate": true
+      }
+    }
+  }
+}

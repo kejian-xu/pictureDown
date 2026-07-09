@@ -205,3 +205,88 @@ pub struct Posts {
     #[serde(default)]
     pub posts: Vec<Value>, // 可以是任何结构
 }
+
+/// 漫画站图片解析结果
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ComicPost {
+    /// 缩略图URL
+    pub thumb_url: String,
+    /// 原图URL（从timthumb.php的src参数提取）
+    pub original_url: String,
+    /// 详情页URL
+    pub post_url: String,
+    /// 图片标题（来自img的alt属性）
+    pub title: String,
+    /// 文件扩展名
+    pub file_ext: String,
+    /// 唯一标识（从URL提取，用于去重）
+    pub uid: String,
+}
+
+/// 漫画站解析配置
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ComicParseConfig {
+    /// 每个图片项的CSS选择器（默认 "figure.picture-img"）
+    pub item_selector: String,
+    /// 详情链接的CSS选择器（默认 "a"）
+    pub link_selector: String,
+    /// 图片的CSS选择器（默认 "img"）
+    pub img_selector: String,
+    /// 标题取自img的哪个属性（默认 "alt"）
+    pub title_attr: String,
+    /// 缩略图取自img的哪个属性（默认 "src"）
+    pub thumb_attr: String,
+    /// 详情链接取自a的哪个属性（默认 "href"）
+    pub link_attr: String,
+    /// 原图提取方式："timthumb"（从timthumb.php?src=提取）或 "direct"（缩略图即原图）
+    pub original_from_thumb: String,
+    /// UID来源："post_url" 或 "original_url"
+    pub uid_from: String,
+}
+
+impl Default for ComicParseConfig {
+    fn default() -> Self {
+        Self {
+            item_selector: "figure.picture-img".to_string(),
+            link_selector: "a".to_string(),
+            img_selector: "img".to_string(),
+            title_attr: "alt".to_string(),
+            thumb_attr: "src".to_string(),
+            link_attr: "href".to_string(),
+            original_from_thumb: "timthumb".to_string(),
+            uid_from: "post_url".to_string(),
+        }
+    }
+}
+
+/// 漫画站解析结果
+#[derive(Debug, Serialize, Deserialize)]
+pub struct ComicPosts {
+    pub posts: Vec<ComicPost>,
+    pub count: i32,
+}
+
+/// 详情页图片解析配置
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DetailParseConfig {
+    /// 图片的CSS选择器（默认 ".single-content img"）
+    pub img_selector: String,
+    /// 图片来源属性，按优先级排列，用 | 分隔（默认 "data-lazy-src|src"）
+    /// 会依次尝试每个属性，取第一个非空且非 data: 的值
+    pub src_attr: String,
+    /// URL过滤：只保留src包含此字符串的图片（如 "img.177pica.com"），空字符串表示不过滤
+    pub url_filter: String,
+    /// 是否去重（默认true）
+    pub deduplicate: bool,
+}
+
+impl Default for DetailParseConfig {
+    fn default() -> Self {
+        Self {
+            img_selector: ".single-content img".to_string(),
+            src_attr: "data-lazy-src|src".to_string(),
+            url_filter: "img.177pica.com".to_string(),
+            deduplicate: true,
+        }
+    }
+}

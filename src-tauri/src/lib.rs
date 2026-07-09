@@ -4,4 +4,4 @@ pub mod commands;
 pub mod models;
 
 pub use commands::run;
-pub use models::{Post, Posts};
+pub use models::{Post, Posts, ComicPost, ComicPosts, ComicParseConfig, DetailParseConfig};

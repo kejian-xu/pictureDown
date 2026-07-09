@@ -1,14 +1,17 @@
 use crate::Posts;
+use crate::models::{ComicPost, ComicPosts, ComicParseConfig, DetailParseConfig};
 use tauri_plugin_fs::FsExt;
+use scraper::{Html, Selector};
+use urlencoding;
 
 
 #[tauri::command]
 async fn fetch_html(url: &str) -> Result<String, String> {
-    // 创建一个基本的客户端配置，完全使用HTTP/1.1以避免HTTP/2帧错误
+    // 创建客户端，强制HTTP/1.1 + 忽略证书 + rustls TLS
     let client = reqwest::Client::builder()
         .user_agent("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/114.0.0.0 Safari/537.36")
-        .danger_accept_invalid_certs(true) // 忽略证书错误
-        // 不使用http2_prior_knowledge方法，让reqwest自动协商HTTP版本
+        .danger_accept_invalid_certs(true)
+        .http1_only()
         .build()
         .map_err(|e| format!("Failed to create client: {}", e))?;
 
@@ -40,6 +43,204 @@ async fn fetch_html(url: &str) -> Result<String, String> {
     }
 }
 
+/// 解析漫画站HTML，提取图片信息
+/// 通过 config 中的 CSS 选择器配置适配不同的漫画站
+#[tauri::command]
+fn parse_comic_html(html: &str, base_url: Option<String>, config: Option<ComicParseConfig>) -> Result<ComicPosts, String> {
+    let base = base_url.unwrap_or_else(|| "https://www.177pica.com".to_string());
+    let cfg = config.unwrap_or_default();
+    let document = Html::parse_document(html);
+
+    let item_selector = Selector::parse(&cfg.item_selector)
+        .map_err(|e| format!("item_selector 解析失败: {}", e))?;
+    let link_selector = Selector::parse(&cfg.link_selector)
+        .map_err(|e| format!("link_selector 解析失败: {}", e))?;
+    let img_selector = Selector::parse(&cfg.img_selector)
+        .map_err(|e| format!("img_selector 解析失败: {}", e))?;
+
+    let mut posts: Vec<ComicPost> = Vec::new();
+
+    for item in document.select(&item_selector) {
+        for a in item.select(&link_selector) {
+            if let Some(img) = a.select(&img_selector).next() {
+                let href = match a.value().attr(&cfg.link_attr) {
+                    Some(h) => h,
+                    None => continue,
+                };
+                let src = match img.value().attr(&cfg.thumb_attr) {
+                    Some(s) => s,
+                    None => continue,
+                };
+                let title = img.value().attr(&cfg.title_attr).unwrap_or("").to_string();
+
+                let post_url = resolve_url(href, &base);
+                let thumb_url = src.to_string();
+
+                // 根据配置决定原图URL提取方式
+                let original_url = match cfg.original_from_thumb.as_str() {
+                    "timthumb" => extract_original_url(&thumb_url)
+                        .unwrap_or_else(|| thumb_url.clone()),
+                    _ => thumb_url.clone(), // "direct": 缩略图即原图
+                };
+
+                // 提取文件扩展名
+                let file_ext = original_url
+                    .split('?')
+                    .next()
+                    .and_then(|u| u.rsplit('.').next())
+                    .unwrap_or("jpg")
+                    .to_string();
+
+                // 根据配置决定UID来源
+                let uid_source = match cfg.uid_from.as_str() {
+                    "original_url" => &original_url,
+                    _ => &post_url, // 默认从post_url提取
+                };
+                let uid = url_to_uid(uid_source).unwrap_or_else(|| {
+                    use std::hash::Hasher;
+                    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+                    std::hash::Hash::hash(uid_source, &mut hasher);
+                    format!("{:x}", hasher.finish())
+                });
+
+                posts.push(ComicPost {
+                    thumb_url,
+                    original_url,
+                    post_url,
+                    title,
+                    file_ext,
+                    uid,
+                });
+            }
+        }
+    }
+
+    let count = posts.len() as i32;
+    Ok(ComicPosts { posts, count })
+}
+
+/// 拼接相对URL为绝对URL
+fn resolve_url(href: &str, base: &str) -> String {
+    if href.starts_with("http") {
+        href.to_string()
+    } else if href.starts_with('/') {
+        format!("{}{}", base, href)
+    } else {
+        format!("{}/{}", base, href)
+    }
+}
+
+/// 解析详情页HTML，直接提取所有图片URL
+/// 适用于 177pica.com 详情页等直接在 <p> 中包含 <img> 的页面
+#[tauri::command]
+fn parse_detail_images(html: &str, config: Option<DetailParseConfig>) -> Result<ComicPosts, String> {
+    let cfg = config.unwrap_or_default();
+    let document = Html::parse_document(html);
+
+    let img_selector = Selector::parse(&cfg.img_selector)
+        .map_err(|e| format!("img_selector 解析失败: {}", e))?;
+
+    let mut posts: Vec<ComicPost> = Vec::new();
+    let mut seen = std::collections::HashSet::new();
+
+    for img in document.select(&img_selector) {
+        // 按优先级依次尝试 src_attr 中配置的属性（用 | 分隔），取第一个有效URL
+        let src = cfg.src_attr
+            .split('|')
+            .map(|a| a.trim())
+            .find_map(|attr| {
+                img.value().attr(attr)
+                    .filter(|s| !s.is_empty() && !s.starts_with("data:"))
+            });
+
+        let src = match src {
+            Some(s) => s,
+            None => continue,
+        };
+
+        // URL过滤
+        if !cfg.url_filter.is_empty() && !src.contains(&cfg.url_filter) {
+            continue;
+        }
+
+        // 去重
+        if cfg.deduplicate {
+            if seen.contains(src) {
+                continue;
+            }
+            seen.insert(src.to_string());
+        }
+
+        let file_url = src.to_string();
+
+        let file_ext = file_url
+            .split('?')
+            .next()
+            .and_then(|u| u.rsplit('.').next())
+            .unwrap_or("jpg")
+            .to_string();
+
+        let uid = url_to_uid(&file_url).unwrap_or_else(|| {
+            use std::hash::Hasher;
+            let mut hasher = std::collections::hash_map::DefaultHasher::new();
+            std::hash::Hash::hash(&file_url, &mut hasher);
+            format!("{:x}", hasher.finish())
+        });
+
+        posts.push(ComicPost {
+            thumb_url: file_url.clone(),
+            original_url: file_url,
+            post_url: String::new(),
+            title: String::new(),
+            file_ext,
+            uid,
+        });
+    }
+
+    let count = posts.len() as i32;
+    Ok(ComicPosts { posts, count })
+}
+
+/// 从timthumb.php的URL中提取原图URL
+/// 例如: https://...timthumb.php?src=http://img.177pica.com/uploads/2026/02a/004640-8.jpg&w=280&h=210
+/// 提取: http://img.177pica.com/uploads/2026/02a/004640-8.jpg
+fn extract_original_url(thumb_url: &str) -> Option<String> {
+    if thumb_url.contains("timthumb.php") {
+        // 解析URL参数
+        if let Some(query_start) = thumb_url.find('?') {
+            let query_str = &thumb_url[query_start + 1..];
+            for param in query_str.split('&') {
+                if let Some(eq_pos) = param.find('=') {
+                    let key = &param[..eq_pos];
+                    let value = &param[eq_pos + 1..];
+                    if key == "src" && !value.is_empty() {
+                        // URL解码并处理HTML实体
+                        let decoded = urlencoding::decode(value)
+                            .map(|cow| cow.into_owned())
+                            .unwrap_or_else(|_| value.to_string());
+                        return Some(decoded);
+                    }
+                }
+            }
+        }
+    }
+    None
+}
+
+/// 从URL中提取唯一标识（如文章ID）
+fn url_to_uid(url: &str) -> Option<String> {
+    // 尝试从URL中提取数字ID
+    // 例如: https://www.177pica.com/html/2026/07/8615523.html → 8615523
+    let without_query = url.split('?').next()?;
+    let filename = without_query.rsplit('/').next()?;
+    let stem = filename.rsplit('.').nth(1)?;
+    if stem.chars().all(|c| c.is_ascii_digit()) && stem.len() >= 3 {
+        Some(stem.to_string())
+    } else {
+        None
+    }
+}
+
 #[tauri::command]
 async fn fetch_posts(
     tags: Option<String>,
@@ -53,6 +254,7 @@ async fn fetch_posts(
 
     let client = reqwest::Client::builder()
         .danger_accept_invalid_certs(true)
+        .http1_only()
         .cookie_store(true)
         .timeout(std::time::Duration::from_secs(30))
         .build()
@@ -290,6 +492,8 @@ fn get_referer_for_image(url: &str) -> &str {
         "https://gelbooru.com/"
     } else if url.contains("rule34") {
         "https://rule34.xxx/"
+    } else if url.contains("img.177pica") || url.contains("177pica.com") {
+        "https://www.177pica.com/"
     } else {
         ""
     }
@@ -299,6 +503,7 @@ fn get_referer_for_image(url: &str) -> &str {
 async fn fetch_image_as_bytes(url: String) -> Result<Vec<u8>, String> {
     let client = reqwest::Client::builder()
         .danger_accept_invalid_certs(true)
+        .http1_only()
         .build()
         .map_err(|e| format!("Failed to create client: {}", e))?;
 
@@ -334,6 +539,7 @@ async fn fetch_image_to_local(url: String, cache_dir: String, filename: String) 
 
     let client = reqwest::Client::builder()
         .danger_accept_invalid_certs(true)
+        .http1_only()
         .build()
         .map_err(|e| format!("Failed to create client: {}", e))?;
 
@@ -359,6 +565,7 @@ async fn fetch_image_to_local(url: String, cache_dir: String, filename: String) 
 async fn fetch_image_as_base64(url: String) -> Result<String, String> {
     let client = reqwest::Client::builder()
         .danger_accept_invalid_certs(true)
+        .http1_only()
         .build()
         .map_err(|e| format!("Failed to create client: {}", e))?;
 
@@ -388,6 +595,7 @@ async fn fetch_image_as_base64(url: String) -> Result<String, String> {
 async fn download_file(url: String, save_path: String) -> Result<(), String> {
     let client = reqwest::Client::builder()
         .danger_accept_invalid_certs(true)
+        .http1_only()
         .build()
         .map_err(|e| format!("Failed to create client: {}", e))?;
 
@@ -434,7 +642,7 @@ pub fn run() {
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_upload::init())
         .plugin(tauri_plugin_cache::init())
-        .invoke_handler(tauri::generate_handler![fetch_html, fetch_posts, fetch_image_as_base64, fetch_image_as_bytes, fetch_image_to_local, download_file, grant_path_access])
+        .invoke_handler(tauri::generate_handler![fetch_html, parse_comic_html, parse_detail_images, fetch_posts, fetch_image_as_base64, fetch_image_as_bytes, fetch_image_to_local, download_file, grant_path_access])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
 }

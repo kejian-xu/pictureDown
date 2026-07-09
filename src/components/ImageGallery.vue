@@ -105,14 +105,14 @@ onMounted(async () => {
       await invoke('grant_path_access', { path: defaultDownloadDir });
     } else {
       defaultDownloadDir = await downloadDir();
-      downloadFilePath.value = defaultDownloadDir;
-      await tauriCacheApi.set("downloadFilePath", defaultDownloadDir);
+      downloadFilePath.value = defaultDownloadDir + '/PictureDown';
+      await tauriCacheApi.set("downloadFilePath", downloadFilePath.value);
     }
   } catch (error) {
     console.error('初始化下载目录失败:', error);
     const defaultDownloadDir = await downloadDir();
-    downloadFilePath.value = defaultDownloadDir;
-    await tauriCacheApi.set("downloadFilePath", defaultDownloadDir);
+    downloadFilePath.value = defaultDownloadDir + '/PictureDown';
+    await tauriCacheApi.set("downloadFilePath", downloadFilePath.value);
   }
   fetchPosts();
 

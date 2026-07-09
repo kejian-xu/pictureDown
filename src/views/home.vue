@@ -1,6 +1,6 @@
 <script setup>
 import { useRouter } from 'vue-router';
-
+// import siteConfig from './comic/comic.json';
 const router = useRouter();
 
 const sites = [
@@ -11,13 +11,13 @@ const sites = [
     route: '/yande',
     color: '#409eff',
   },
-  {
-    key: 'konachan',
-    name: 'Konachan',
-    description: '动漫壁纸图片站，支持标签搜索与批量下载',
-    route: '/konachan',
-    color: '#e6a23c',
-  },
+  // {
+  //   key: 'konachan',
+  //   name: 'Konachan',
+  //   description: '动漫壁纸图片站，支持标签搜索与批量下载',
+  //   route: '/konachan',
+  //   color: '#e6a23c',
+  // },
   {
     key: 'danbooru',
     name: 'Danbooru',
@@ -25,13 +25,13 @@ const sites = [
     route: '/danbooru',
     color: '#f56c6c',
   },
-  {
-    key: 'gelbooru',
-    name: 'Gelbooru',
-    description: '老牌图片站，资源丰富，无须特殊网络',
-    route: '/gelbooru',
-    color: '#67c23a',
-  },
+  // {
+  //   key: 'gelbooru',
+  //   name: 'Gelbooru',
+  //   description: '老牌图片站，资源丰富，无须特殊网络',
+  //   route: '/gelbooru',
+  //   color: '#67c23a',
+  // },
   {
     key: 'rule34',
     name: 'Rule34',
@@ -41,6 +41,20 @@ const sites = [
   },
   // 后续可以在此添加更多图站
 ];
+const comic = [
+  {
+    key: '177comic',
+    name: '177comic',
+    description: '高质量漫画资源站',
+    route: '/comic/home?name=177comic',
+  },
+  {
+    key: 'wnacg',
+    name: 'wnacg',
+    description: '高质量漫画资源站',
+    route: '/comic/home?name=wnacg',
+  },
+]
 </script>
 
 <template>
@@ -65,9 +79,24 @@ const sites = [
       </div>
     </div>
 
-    <footer class="home-footer">
+    <span class="home-footer">
       <span>更多图站即将接入…</span>
-    </footer>
+    </span>
+    <div class="site-grid">
+      <div
+        v-for="site in comic"
+        :key="site.key"
+        class="site-card"
+        @click="router.push(site.route)"
+      >
+        <div class="site-card-badge" ></div>
+        <div class="site-card-body">
+          <h3>{{ site.name }}</h3>
+          <p>{{ site.description }}</p>
+        </div>
+      </div>
+    </div>
+
   </div>
 </template>
 
