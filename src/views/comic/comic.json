@@ -3,18 +3,32 @@
     "main_url": "https://www.177pica.com",
     "protocol_prefix": "https:",
     "home": {
+      "catgory": [
+        {
+          "url": "/html/category/tt/",
+          "title": "中文成人H漫画(Chinese)"
+        },{
+           "url": "/html/category/jj/",
+          "title": "日文成人H漫画(Chinese)"
+        }
+      ],
       "url": "/",
+      "title": "首页",
       "detail_path_regex": "/html/(.+)\\.html$",
       "parseConfig": {
+        "page": true,
         "item_selector": "figure.picture-img",
         "link_selector": "a",
         "img_selector": "img",
         "title_attr": "alt",
         "thumb_attr": "src",
-        "link_attr": "href"
+        "link_attr": "href",
+        "page_size_selector": ".nav-links .page-numbers",
+        "page_size_url": "page/{num}/"
       }
     },
     "detail": {
+      "title": "详情页",
       "url": "/html/{detailPath}.html",
       "extract_method": "css",
       "parseConfig": {
@@ -31,6 +45,7 @@
     "protocol_prefix": "https:",
     "home": {
       "url": "/",
+       "title": "首页",
       "detail_path_regex": "/photos-index-aid-(\\d+)\\.html$",
       "parseConfig": {
         "item_selector": ".gallary_item",
@@ -43,9 +58,8 @@
     },
     "detail": {
       "url": "/photos-item-aid-{detailPath}.html",
+      "title": "详情页",
       "extract_method": "string",
-      "script_match": "mReader\\.initData\\(([\\s\\S]*?)\\);",
-      "img_url_key": "page_url",
       "parseConfig": {
         "page": false,
         "img_selector": ".pic_box a img",

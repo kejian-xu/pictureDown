@@ -12,15 +12,18 @@ const route = useRoute();
 // ============ 站点配置 ============
 
 /** 从 comic.json 中根据 name 获取当前站点配置 */
-const name = route.query.name || "177comic";
+const name = route.query.name;
 const site = siteConfig[name];
 const mainUrl = site?.main_url || "";
-const homeUrl = mainUrl + (site?.home?.url || "/");
+
 const protocolPrefix = site?.protocol_prefix || "https:";
 const parseConfig = site?.home?.parseConfig || {};
 const detailPathRegex = site?.home?.detail_path_regex
   ? new RegExp(site.home.detail_path_regex)
   : null;
+const catgory = site?.home?.catgory || []
+
+const hasPage = parseConfig.page === true;
 
 /** 统一URL补全：处理 // 协议相对、/绝对路径、相对路径 */
 function resolveUrl(href, base) {
@@ -32,6 +35,10 @@ function resolveUrl(href, base) {
 
 // ============ 响应式数据 ============
 
+/** 请求地址 */
+const parentUrl = ref("")
+const homeUrl = ref("")
+const activeUrl= ref("")
 /** 图片列表 */
 const images = ref([]);
 
@@ -40,6 +47,12 @@ const loading = ref(false);
 
 /** 错误信息 */
 const error = ref("");
+
+const pageLinks = ref([]);
+const currentPage = ref(1);
+const pageSize = ref(10);
+const maxPage = ref(0);
+const pageUrlPattern = parseConfig.page_size_url || "";
 
 // ============ HTML 解析 ============
 
@@ -87,6 +100,29 @@ function parseComicHtml(html, baseUrl, config) {
       });
     });
   });
+ // 有分页时提取最大页码并自动生成分页链接（仅在页面初始化时执行一次）
+  if (hasPage && pageLinks.value.length === 0) {
+    let max = 1;
+    $(cfg.page_size_selector).each((_, el) => {
+      const href = $(el).attr("href");
+      if (!href) return;
+      // 从 page_url_pattern 匹配页码，例如 /page/{num}/ → 匹配 /page/1662/
+      const escaped = pageUrlPattern.replace(/\{[^}]+\}/g, "(\\d+)");
+      const m = href.match(new RegExp(escaped));
+      if (m) {
+        const n = parseInt(m[1], 10);
+        if (n > max) max = n;
+      }
+    });
+    maxPage.value = max;
+    // 自动生成页码数组
+    for (let i = 1; i <= max; i++) {
+      pageLinks.value.push({
+        num: i,
+        url: pageUrlPattern.replace(/\{[^}]+\}/g, i),
+      });
+    }
+  }
 
   return { posts, count: posts.length };
 }
@@ -98,6 +134,8 @@ onMounted(() => {
     error.value = `未找到站点配置: ${name}`;
     return;
   }
+  parentUrl.value =  mainUrl + site?.home?.url;
+  homeUrl.value = mainUrl + (site?.home?.url || "/");
   fetchData();
 });
 
@@ -108,7 +146,8 @@ async function fetchData() {
   error.value = "";
 
   try {
-    const html = await invoke("fetch_html", { url: homeUrl });
+    console.log("homeUrl",homeUrl.value)
+    const html = await invoke("fetch_html", { url: homeUrl.value });
     const result = parseComicHtml(html, mainUrl, parseConfig);
 
     images.value = result.posts.map((post, i) => ({
@@ -130,6 +169,23 @@ async function fetchData() {
     loading.value = false;
   }
 }
+function handleChangePage(item) {
+  activeUrl.value = item?.url;
+  currentPage.value = 1;
+  parentUrl.value =  mainUrl + item?.url;
+  homeUrl.value = mainUrl + (item?.url || "/");
+  pageLinks.value = [];
+  maxPage.value = 0;
+  fetchData();
+}
+function goToPage(page) {
+  if (page === currentPage.value) return;
+  currentPage.value = page;
+  homeUrl.value = parentUrl.value + pageLinks.value[page - 1].url;
+  fetchData();
+}
+
+
 
 // ============ 图片交互 ============
 
@@ -161,10 +217,15 @@ function handleImageError(event, index) {
     <div class="comic-section">
       <!-- 顶栏 -->
       <div class="comic-search-bar">
-        <el-button icon="ArrowLeft" @click="$router.push('/')" circle />
-        <el-button type="primary" @click="fetchData" :loading="loading">
+        <div class="comic-search-bar-left">
+          <el-button icon="ArrowLeft" @click="$router.push('/')" circle />
+          <span v-for="item in catgory" @click="handleChangePage(item)" :class="activeUrl === item.url? 'active':''">
+            {{ item.title }}
+          </span>
+        </div>
+        <!-- <el-button class="" type="primary" @click="fetchData" :loading="loading">
           {{ loading ? "加载中..." : "刷新" }}
-        </el-button>
+        </el-button> -->
       </div>
 
       <!-- 错误信息 -->
@@ -194,7 +255,18 @@ function handleImageError(event, index) {
           暂无图片数据
         </div>
       </div>
-
+      <!-- 分页 -->
+      <div class="comic-pagination" v-if="hasPage && maxPage > 1">
+          <el-pagination
+          :current-page="currentPage"
+          background
+          prev-text="上一页"
+          next-text="下一页"
+          layout="total, prev, pager, next, jumper"
+          :total="maxPage * 10"
+          @current-change="goToPage"
+        />
+      </div>
     </div>
   </main>
 </template>
@@ -203,6 +275,7 @@ function handleImageError(event, index) {
 .comic-section {
   width: 100%;
   margin: 0 auto;
+
 }
 
 .comic-search-bar {
@@ -213,7 +286,24 @@ function handleImageError(event, index) {
   z-index: 1001;
   box-shadow: 0 2px 10px rgba(0, 0, 0, 0.1);
   border-radius: 0 0 8px 8px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
 }
+.comic-search-bar-left {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.comic-search-bar-left span{
+  cursor: pointer;
+}
+.comic-search-bar-left span.active {
+  color: var(--el-color-primary);
+  border-bottom: solid 1px var(--el-color-primary);
+}
+
 
 .comic-error {
   color: #e53935;
@@ -292,4 +382,24 @@ function handleImageError(event, index) {
   text-align: center;
 }
 
+.comic-pagination {
+  position: sticky;
+  bottom: 0;
+  background-color: white;
+  padding: 10px;
+  box-shadow: 0 -2px 10px rgba(0, 0, 0, 0.1);
+  z-index: 1001;
+  display: flex;
+  justify-content: center;
+  gap: 10px;
+
+}
+.comic-pagination span {
+  border-radius: 4px;
+  padding: 0 5px;
+  height: 20px;
+  color: var(--el-color-primary);
+  border: solid 1px var(--el-color-primary);
+  cursor: pointer;
+}
 </style>
